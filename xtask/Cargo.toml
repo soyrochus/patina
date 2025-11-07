@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+authors = ["Patina Contributors"]
+description = "Automation helpers for Patina"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+patina-core = { path = "../core" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }

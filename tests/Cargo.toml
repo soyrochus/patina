@@ -1,0 +1,12 @@
+[package]
+name = "patina-tests"
+version = "0.1.0"
+edition = "2021"
+authors = ["Patina Contributors"]
+description = "Integration and smoke tests for Patina"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+patina-core = { path = "../core" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
