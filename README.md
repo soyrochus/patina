@@ -1,0 +1,98 @@
+# Patina
+
+Patina is a native desktop chat client written in Rust with an `egui` interface and a modular core that supports large language model (LLM) providers and Model Context Protocol (MCP) integrations. The workspace is split into multiple crates to encourage reuse, automated testing, and streamlined tooling.
+
+## Workspace layout
+
+```
+patina/
+├── app/          # Graphical user interface built with eframe/egui
+├── core/         # Shared business logic, state, LLM providers, auth, and MCP
+├── tests/        # Unit, integration, and end-to-end style tests
+└── xtask/        # Automation helpers (smoke tests, fixtures, CI hooks)
+```
+
+Each crate has its own `Cargo.toml` and uses workspace dependencies declared at the root.
+
+## Features
+
+- **Chat experience:** Markdown-rendered conversations with syntax highlighting for code blocks via `egui_commonmark` and `syntect`.
+- **LLM provider abstraction:** Unified driver for OpenAI, Azure OpenAI, and mock implementations with streaming-friendly APIs.
+- **Authentication orchestration:** Handles server- and client-managed OAuth modes with persisted secrets ready for reuse.
+- **MCP integration scaffolding:** JSON-RPC ready client registry capable of simulating tool invocations and auth handshakes.
+- **Persistent history:** Conversations are stored as JSON Lines files and reloaded on startup.
+- **Automation:** An `xtask smoke` command exercises the core logic without launching the UI.
+
+## Getting started
+
+### Prerequisites
+
+- Rust 1.76 or newer with `cargo`
+- A recent graphics driver capable of running `egui`/`eframe`
+
+Optional environment variables configure LLM providers:
+
+```
+LLM_PROVIDER=openai              # or azure_openai, mock
+OPENAI_API_KEY=...               # required for OpenAI provider
+OPENAI_MODEL=gpt-4o-mini
+AZURE_OPENAI_ENDPOINT=https://example.openai.azure.com/
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
+```
+
+### Building and running the desktop app
+
+```
+cargo run -p patina-app
+```
+
+The first launch creates a data directory under your platform’s application data folder (for example, `~/Library/Application Support/Patina` on macOS). Conversations persist between sessions.
+
+### Running automated tests
+
+```
+cargo test --workspace
+```
+
+To execute the smoke test provided by the automation crate:
+
+```
+cargo run -p xtask -- smoke
+```
+
+## Project structure in detail
+
+### app crate
+
+Implements the `eframe` application. It renders the conversation list, streaming message view, and message composer. Background tasks spawn on a dedicated Tokio runtime and synchronize with the UI using unbounded channels.
+
+### core crate
+
+Holds the domain logic:
+
+- `state.rs` – application state machine, conversation management, persistence hooks.
+- `llm.rs` – provider abstractions for OpenAI, Azure OpenAI, and a mock driver used by tests.
+- `mcp.rs` – lightweight MCP client and registry with auth-aware handshake scaffolding.
+- `auth.rs` – server/client OAuth coordination that persists refreshed tokens alongside transcripts.
+- `store.rs` – JSONL transcript storage and secret persistence.
+- `telemetry.rs` – idempotent tracing initialization for binaries and tools.
+
+### tests crate
+
+Hosts unit, integration, and end-to-end tests. The initial suite validates conversation persistence and response generation using the mock LLM driver. Additional tests can be added under `unit/`, `integration/`, and `e2e/`.
+
+### xtask crate
+
+Provides automation entry points. `cargo run -p xtask -- smoke` spins up the core logic with the mock LLM driver and logs the resulting conversation metadata, suitable for CI smoke checks.
+
+## Contributing
+
+1. Fork and clone the repository.
+2. Run `cargo fmt` before committing.
+3. Add tests for any new functionality in the appropriate crate.
+4. Use `cargo run -p xtask -- smoke` to validate end-to-end behavior.
+
+## License
+
+Dual-licensed under MIT or Apache-2.0 at your option.
