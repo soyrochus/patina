@@ -332,6 +332,44 @@ mod tests {
     }
 
     #[test]
+    fn uses_dotenv_when_env_missing() {
+        let env = HashMap::new();
+        let dotenv = HashMap::from([
+            ("LLM_PROVIDER".to_string(), "openai".to_string()),
+            ("OPENAI_API_KEY".to_string(), "dotenv-key".to_string()),
+        ]);
+        let result = resolve_config(env_lookup_factory(env), &dotenv, None).unwrap();
+        assert!(matches!(result.provider, LlmProviderKind::OpenAi));
+        assert_eq!(
+            result.openai.as_ref().unwrap().api_key,
+            "dotenv-key".to_string()
+        );
+    }
+
+    #[test]
+    fn falls_back_to_yaml_when_no_env_or_dotenv() {
+        let env = HashMap::new();
+        let dotenv = HashMap::new();
+        let yaml = AiSection {
+            provider: Some("azure_openai".to_string()),
+            openai: None,
+            azure_openai: Some(AzureSection {
+                api_key: Some("yaml-key".to_string()),
+                endpoint: Some("https://example.azure.com".to_string()),
+                api_version: Some("2024-12-01-preview".to_string()),
+                deployment_name: Some("gpt-4o".to_string()),
+            }),
+        };
+        let result = resolve_config(env_lookup_factory(env), &dotenv, Some(&yaml)).unwrap();
+        assert!(matches!(result.provider, LlmProviderKind::AzureOpenAi));
+        let azure = result.azure.unwrap();
+        assert_eq!(azure.api_key, "yaml-key");
+        assert_eq!(azure.endpoint, "https://example.azure.com");
+        assert_eq!(azure.api_version, "2024-12-01-preview");
+        assert_eq!(azure.deployment_name, "gpt-4o");
+    }
+
+    #[test]
     fn errors_on_missing_provider() {
         let env = HashMap::new();
         let err = resolve_config(env_lookup_factory(env), &HashMap::new(), None).unwrap_err();

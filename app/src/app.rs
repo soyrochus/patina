@@ -5,7 +5,7 @@ use crate::ui::{
 };
 use anyhow::Result;
 use directories::ProjectDirs;
-use egui::{self, Margin, RichText};
+use egui::{self, Margin, RichText, Stroke};
 use egui_commonmark::CommonMarkCache;
 use patina_core::state::AppState;
 use patina_core::LlmStatus;
@@ -21,6 +21,15 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 const SETTINGS_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+const SPLASH_DURATION: Duration = Duration::from_secs(1);
+const MANUAL_DISMISS_DELAY: Duration = Duration::from_millis(150);
+const ABOUT_LOGO_BYTES: &[u8] = include_bytes!("../../images/patina-logo-min-transparent.png");
+
+#[derive(Clone, Copy)]
+enum AboutMode {
+    Splash { opened: Instant },
+    Manual { opened: Instant },
+}
 
 pub struct PatinaEguiApp {
     state: Arc<AppState>,
@@ -39,6 +48,8 @@ pub struct PatinaEguiApp {
     mcp_entries: Vec<McpSidebarEntry>,
     pinned_lookup: HashSet<Uuid>,
     last_settings_flush: Instant,
+    logo_texture: Option<egui::TextureHandle>,
+    about_mode: Option<AboutMode>,
 }
 
 impl PatinaEguiApp {
@@ -74,6 +85,10 @@ impl PatinaEguiApp {
             mcp_entries: default_mcp_entries(),
             pinned_lookup: HashSet::new(),
             last_settings_flush: Instant::now(),
+            logo_texture: None,
+            about_mode: Some(AboutMode::Splash {
+                opened: Instant::now(),
+            }),
         };
         app.refresh_pinned_cache();
         app
@@ -415,10 +430,107 @@ impl PatinaEguiApp {
     fn render(&mut self, ctx: &egui::Context) {
         self.apply_theme(ctx);
         self.process_background_results();
-        self.handle_shortcuts(ctx);
+        if !matches!(self.about_mode, Some(AboutMode::Manual { .. })) {
+            self.handle_shortcuts(ctx);
+        }
         self.layout(ctx);
+        self.draw_about_dialog(ctx);
         self.capture_window_size(ctx);
         self.flush_settings_if_needed();
+    }
+
+    fn draw_about_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mode) = self.about_mode else {
+            return;
+        };
+
+        if self.logo_texture.is_none() {
+            if let Some(image) = decode_logo_color_image(ABOUT_LOGO_BYTES) {
+                self.logo_texture = Some(ctx.load_texture(
+                    "patina_about_logo",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+        }
+
+        let frame = egui::Frame::none()
+            .fill(self.palette.surface)
+            .stroke(Stroke::new(1.0, self.palette.border))
+            .rounding(egui::Rounding::same(12.0))
+            .inner_margin(Margin::symmetric(20.0, 16.0));
+
+        let mut open = true;
+        let is_manual = matches!(mode, AboutMode::Manual { .. });
+
+        egui::Window::new("About Patina")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .frame(frame)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some(texture) = &self.logo_texture {
+                        let mut size = texture.size_vec2();
+                        if size.x > 120.0 {
+                            size *= 120.0 / size.x;
+                        }
+                        ui.add(egui::widgets::Image::new((texture.id(), size)));
+                    } else {
+                        ui.allocate_space(egui::vec2(120.0, 120.0));
+                    }
+                    ui.add_space(16.0);
+                    ui.vertical(|ui| {
+                        ui.heading("Patina Desktop");
+                        ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                        ui.add_space(8.0);
+                        ui.label(
+                            "Patina is a native desktop chat client with OpenAI, Azure OpenAI, and MCP integrations.",
+                        );
+                        ui.add_space(8.0);
+                        ui.label("License: MIT OR Apache-2.0");
+                        ui.label("© 2025 Iwan van der Kleijn");
+                        if is_manual {
+                            ui.add_space(12.0);
+                            ui.label(
+                                RichText::new("Press any key or click to dismiss")
+                                    .italics()
+                                    .small(),
+                            );
+                        }
+                    });
+                });
+            });
+
+        if !open {
+            self.about_mode = None;
+            return;
+        }
+
+        let should_close = match &mut self.about_mode {
+            Some(AboutMode::Splash { opened }) => opened.elapsed() >= SPLASH_DURATION,
+            Some(AboutMode::Manual { opened }) => {
+                if opened.elapsed() < MANUAL_DISMISS_DELAY {
+                    false
+                } else {
+                    ctx.input(|input| {
+                        input.events.iter().any(|event| {
+                            matches!(
+                                event,
+                                egui::Event::PointerButton { pressed: true, .. }
+                                    | egui::Event::Key { pressed: true, .. }
+                            )
+                        })
+                    })
+                }
+            }
+            None => false,
+        };
+
+        if should_close {
+            self.about_mode = None;
+        }
     }
 }
 
@@ -438,6 +550,17 @@ impl eframe::App for PatinaEguiApp {
 
 pub fn render_ui(ctx: &egui::Context, app_state: &mut PatinaEguiApp) {
     app_state.render(ctx);
+}
+
+fn decode_logo_color_image(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let dynamic = image::load_from_memory(bytes).ok()?;
+    let rgba = dynamic.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let pixels = rgba.into_raw();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [width as usize, height as usize],
+        &pixels,
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

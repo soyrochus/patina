@@ -2008,6 +2008,7 @@ dependencies = [
  "egui",
  "egui_commonmark",
  "futures",
+ "image",
  "parking_lot",
  "patina-core",
  "serde",

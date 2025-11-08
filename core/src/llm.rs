@@ -72,6 +72,7 @@ impl LlmDriver {
     }
 
     async fn from_settings(settings: AiRuntimeSettings) -> Result<Self> {
+        let client = Client::builder().build()?;
         match settings.provider {
             LlmProviderKind::OpenAi => {
                 let creds = settings
@@ -81,8 +82,8 @@ impl LlmDriver {
                     .model
                     .clone()
                     .unwrap_or_else(|| "gpt-4o-mini".to_string());
-                let client = Client::builder().build()?;
-                let provider = HttpOpenAiProvider::new(client, creds.api_key, model.clone());
+                let provider =
+                    OpenAiChatProvider::openai(client.clone(), creds.api_key, model.clone());
                 Ok(Self::ready(
                     LlmConfig::new(LlmProviderKind::OpenAi, Some(model)),
                     Arc::new(provider),
@@ -92,10 +93,9 @@ impl LlmDriver {
                 let creds = settings
                     .azure
                     .ok_or_else(|| anyhow!("Azure OpenAI credentials missing after resolution"))?;
-                let client = Client::builder().build()?;
                 let deployment = creds.deployment_name.clone();
-                let provider = HttpAzureOpenAiProvider::new(
-                    client,
+                let provider = OpenAiChatProvider::azure(
+                    client.clone(),
                     creds.endpoint,
                     creds.api_key,
                     creds.api_version,
@@ -166,111 +166,114 @@ impl LlmDriver {
     }
 }
 
-struct HttpOpenAiProvider {
+struct OpenAiChatProvider {
     client: Client,
-    api_key: String,
-    model: String,
+    backend: OpenAiBackend,
 }
 
-impl HttpOpenAiProvider {
-    fn new(client: Client, api_key: String, model: String) -> Self {
+impl OpenAiChatProvider {
+    fn openai(client: Client, api_key: String, model: String) -> Self {
         Self {
             client,
-            api_key,
-            model,
+            backend: OpenAiBackend::OpenAi { api_key, model },
         }
     }
-}
 
-#[async_trait]
-impl LanguageModelProvider for HttpOpenAiProvider {
-    async fn send_chat(
-        &self,
-        messages: &[ChatMessage],
-        config: &LlmConfig,
-    ) -> Result<ChatResponse> {
-        let request = OpenAiChatRequest {
-            model: self.model.clone(),
-            messages: map_messages(messages),
-        };
-        let response = self
-            .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .bearer_auth(&self.api_key)
-            .json(&request)
-            .send()
-            .await
-            .context("OpenAI request failed")?
-            .error_for_status()
-            .context("OpenAI returned an error status")?;
-        let payload: ChatCompletionResponse = response
-            .json()
-            .await
-            .context("OpenAI response decoding failed")?;
-        completion_to_chat(payload, config)
-    }
-}
-
-struct HttpAzureOpenAiProvider {
-    client: Client,
-    endpoint: String,
-    api_key: String,
-    api_version: String,
-    deployment_name: String,
-}
-
-impl HttpAzureOpenAiProvider {
-    fn new(
+    fn azure(
         client: Client,
         endpoint: String,
         api_key: String,
         api_version: String,
-        deployment_name: String,
+        deployment: String,
     ) -> Self {
         Self {
             client,
-            endpoint,
-            api_key,
-            api_version,
-            deployment_name,
+            backend: OpenAiBackend::Azure {
+                api_key,
+                endpoint,
+                api_version,
+                deployment,
+            },
+        }
+    }
+}
+
+enum OpenAiBackend {
+    OpenAi {
+        api_key: String,
+        model: String,
+    },
+    Azure {
+        api_key: String,
+        endpoint: String,
+        api_version: String,
+        deployment: String,
+    },
+}
+
+impl OpenAiBackend {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::OpenAi { .. } => "OpenAI",
+            Self::Azure { .. } => "Azure OpenAI",
         }
     }
 
-    fn request_url(&self) -> String {
-        let base = self.endpoint.trim_end_matches('/');
-        format!(
-            "{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}",
-            base = base,
-            deployment = self.deployment_name,
-            api_version = self.api_version
-        )
+    fn request_builder(&self, client: &Client) -> reqwest::RequestBuilder {
+        match self {
+            Self::OpenAi { api_key, .. } => client
+                .post("https://api.openai.com/v1/chat/completions")
+                .bearer_auth(api_key),
+            Self::Azure {
+                api_key,
+                endpoint,
+                api_version,
+                deployment,
+            } => {
+                let base = endpoint.trim_end_matches('/');
+                let url = format!(
+                    "{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}",
+                    base = base,
+                    deployment = deployment,
+                    api_version = api_version
+                );
+                client.post(url).header("api-key", api_key)
+            }
+        }
+    }
+
+    fn request_model(&self) -> Option<&str> {
+        match self {
+            Self::OpenAi { model, .. } => Some(model.as_str()),
+            Self::Azure { .. } => None,
+        }
     }
 }
 
 #[async_trait]
-impl LanguageModelProvider for HttpAzureOpenAiProvider {
+impl LanguageModelProvider for OpenAiChatProvider {
     async fn send_chat(
         &self,
         messages: &[ChatMessage],
         config: &LlmConfig,
     ) -> Result<ChatResponse> {
-        let request = AzureChatRequest {
+        let payload = ChatCompletionRequest {
+            model: self.backend.request_model().map(|model| model.to_string()),
             messages: map_messages(messages),
         };
         let response = self
-            .client
-            .post(self.request_url())
-            .header("api-key", &self.api_key)
-            .json(&request)
+            .backend
+            .request_builder(&self.client)
+            .json(&payload)
             .send()
             .await
-            .context("Azure OpenAI request failed")?
+            .with_context(|| format!("{} request failed", self.backend.label()))?
             .error_for_status()
-            .context("Azure OpenAI returned an error status")?;
+            .with_context(|| format!("{} returned an error status", self.backend.label()))?;
         let payload: ChatCompletionResponse = response
             .json()
             .await
-            .context("Azure OpenAI response decoding failed")?;
+            .with_context(|| format!("{} response decoding failed", self.backend.label()))?;
         completion_to_chat(payload, config)
     }
 }
@@ -290,13 +293,9 @@ impl LanguageModelProvider for MockProvider {
 }
 
 #[derive(Serialize)]
-struct OpenAiChatRequest {
-    model: String,
-    messages: Vec<CompletionRequestMessage>,
-}
-
-#[derive(Serialize)]
-struct AzureChatRequest {
+struct ChatCompletionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
     messages: Vec<CompletionRequestMessage>,
 }
 
@@ -350,7 +349,10 @@ fn api_role(role: &MessageRole) -> String {
     .to_string()
 }
 
-fn completion_to_chat(payload: ChatCompletionResponse, _config: &LlmConfig) -> Result<ChatResponse> {
+fn completion_to_chat(
+    payload: ChatCompletionResponse,
+    _config: &LlmConfig,
+) -> Result<ChatResponse> {
     let choice = payload
         .choices
         .into_iter()

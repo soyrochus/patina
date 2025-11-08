@@ -6,6 +6,17 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tracing_subscriber::EnvFilter;
 
+fn load_application_icon() -> Option<egui::IconData> {
+    let bytes = include_bytes!("../../images/patina-logo-min-transparent.png");
+    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = (image.width(), image.height());
+    Some(egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
 fn main() -> anyhow::Result<()> {
     telemetry::init_tracing(EnvFilter::from_default_env())?;
 
@@ -18,9 +29,12 @@ fn main() -> anyhow::Result<()> {
     let mut settings = Some(UiSettingsStore::load());
     let initial_size = settings.as_ref().unwrap().data().window_size;
     let inner_size = egui::vec2(initial_size[0].max(1024.0), initial_size[1].max(720.0));
-    let viewport = egui::ViewportBuilder::default()
+    let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size(inner_size)
         .with_min_inner_size(egui::vec2(1024.0, 720.0));
+    if let Some(icon) = load_application_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let native_options = eframe::NativeOptions {
         viewport,
         follow_system_theme: true,
