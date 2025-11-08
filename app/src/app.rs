@@ -1,16 +1,18 @@
-const ABOUT_LOGO_BYTES: &[u8] = include_bytes!("../../images/patina-logo-min-transparent.png");
 const ABOUT_WINDOW_WIDTH: f32 = 640.0;
 const ABOUT_WINDOW_HEIGHT: f32 = 360.0;
 const ABOUT_LOGO_MAX_WIDTH: f32 = 240.0;
 
-use crate::ui::{
-    ChatPanel, ChatPanelState, InputBar, InputBarOutput, InputBarState, McpSidebarEntry, McpStatus,
-    MenuBar, MenuBarOutput, MenuBarState, Sidebar, SidebarOutput, SidebarState, ThemeMode,
-    ThemePalette,
+use crate::{
+    assets,
+    ui::{
+        ChatPanel, ChatPanelState, InputBar, InputBarOutput, InputBarState, McpSidebarEntry,
+        McpStatus, MenuBar, MenuBarOutput, MenuBarState, Sidebar, SidebarOutput, SidebarState,
+        ThemeMode, ThemePalette,
+    },
 };
 use anyhow::Result;
 use directories::ProjectDirs;
-use egui::{self, Margin, RichText, Stroke};
+use egui::{self, Margin, RichText, Stroke, TextureOptions};
 use egui_commonmark::CommonMarkCache;
 use patina_core::state::AppState;
 use patina_core::LlmStatus;
@@ -131,6 +133,15 @@ impl PatinaEguiApp {
         }
     }
 
+    fn ensure_logo_texture(&mut self, ctx: &egui::Context) {
+        if self.logo_texture.is_some() {
+            return;
+        }
+        let image = assets::logo_color_image().clone();
+        let texture = ctx.load_texture("patina_logo", image, TextureOptions::LINEAR);
+        self.logo_texture = Some(texture);
+    }
+
     fn apply_theme(&mut self, ctx: &egui::Context) {
         let resolved_mode = match self.menu_state.theme_mode {
             ThemeMode::System => match self.system_theme.unwrap_or(eframe::Theme::Dark) {
@@ -158,7 +169,7 @@ impl PatinaEguiApp {
                     .inner_margin(Margin::symmetric(12.0, 8.0)),
             )
             .show(ctx, |ui| {
-                let output = MenuBar::show(ui, &mut self.menu_state);
+                let output = MenuBar::show(ui, &mut self.menu_state, self.logo_texture.as_ref());
                 self.handle_menu_output(output);
                 if let Some(err) = &self.error {
                     ui.colored_label(self.palette.warning, err);
@@ -447,6 +458,7 @@ impl PatinaEguiApp {
         if !matches!(self.about_mode, Some(AboutMode::Manual { .. })) {
             self.handle_shortcuts(ctx);
         }
+        self.ensure_logo_texture(ctx);
         self.layout(ctx);
         self.draw_about_dialog(ctx);
         self.capture_window_size(ctx);
@@ -461,16 +473,6 @@ impl PatinaEguiApp {
         let Some(mode) = self.about_mode else {
             return;
         };
-
-        if self.logo_texture.is_none() {
-            if let Some(image) = decode_logo_color_image(ABOUT_LOGO_BYTES) {
-                self.logo_texture = Some(ctx.load_texture(
-                    "patina_about_logo",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
-            }
-        }
 
         let frame = egui::Frame::none()
             .fill(self.palette.surface)
@@ -493,7 +495,8 @@ impl PatinaEguiApp {
                 ui.set_min_size(egui::vec2(ABOUT_WINDOW_WIDTH, ABOUT_WINDOW_HEIGHT));
                 ui.horizontal(|ui| {
                     if let Some(texture) = &self.logo_texture {
-                        let mut size = texture.size_vec2();
+                        let dims = assets::logo_dimensions();
+                        let mut size = egui::vec2(dims[0] as f32, dims[1] as f32);
                         if size.x > ABOUT_LOGO_MAX_WIDTH {
                             size *= ABOUT_LOGO_MAX_WIDTH / size.x;
                         }
@@ -571,17 +574,6 @@ impl eframe::App for PatinaEguiApp {
 
 pub fn render_ui(ctx: &egui::Context, app_state: &mut PatinaEguiApp) {
     app_state.render(ctx);
-}
-
-fn decode_logo_color_image(bytes: &[u8]) -> Option<egui::ColorImage> {
-    let dynamic = image::load_from_memory(bytes).ok()?;
-    let rgba = dynamic.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    let pixels = rgba.into_raw();
-    Some(egui::ColorImage::from_rgba_unmultiplied(
-        [width as usize, height as usize],
-        &pixels,
-    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

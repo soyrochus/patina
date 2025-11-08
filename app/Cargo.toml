@@ -1,10 +1,14 @@
 [package]
-name = "patina-app"
+name = "patina"
 version = "0.2.0"
 edition = "2021"
 authors = ["Patina Contributors"]
 description = "Patina desktop chat client"
 license = "MIT"
+
+[[bin]]
+name = "patina"
+path = "src/main.rs"
 
 [dependencies]
 patina-core = { path = "../core" }

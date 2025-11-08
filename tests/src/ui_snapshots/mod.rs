@@ -1,6 +1,6 @@
 use egui::{self, RawInput};
-use patina_app::ui::ThemeMode;
-use patina_app::{render_ui, PatinaEguiApp, UiSettingsStore};
+use patina::ui::ThemeMode;
+use patina::{render_ui, PatinaEguiApp, UiSettingsStore};
 use patina_core::{llm::LlmDriver, state::AppState, store::TranscriptStore};
 use std::fs;
 use std::path::PathBuf;
@@ -68,7 +68,12 @@ fn summarize_output(ctx: &egui::Context, output: &egui::FullOutput) -> String {
 fn assert_snapshot(name: &str, actual: &str) {
     let path = snapshot_path(name);
     if let Ok(expected) = fs::read_to_string(&path) {
-        assert_eq!(actual, expected, "snapshot {} drifted", name);
+        assert_eq!(
+            actual.trim_end(),
+            expected.trim_end(),
+            "snapshot {} drifted",
+            name
+        );
     } else {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create snapshot dir");

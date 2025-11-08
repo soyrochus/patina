@@ -52,7 +52,7 @@ AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 ### Building and running the desktop app
 
 ```
-cargo run -p patina-app
+cargo run -p patina
 ```
 
 The first launch creates a data directory under your platform’s application data folder (for example, `~/Library/Application Support/Patina` on macOS). Conversations persist between sessions.
@@ -68,6 +68,13 @@ To execute the smoke test provided by the automation crate:
 ```
 cargo run -p xtask -- smoke
 ```
+
+### Release binaries
+
+Tagging a commit with `v*` (for example `git tag v0.3.0 && git push --tags`) triggers
+`.github/workflows/release.yml`. The workflow builds single-file binaries named `patina`
+(`patina.exe` on Windows) with embedded assets for Linux, macOS, and Windows, strips the symbols,
+and uploads the artifacts as workflow outputs.
 
 ## Project structure in detail
 

@@ -1,0 +1,101 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary_path: target/x86_64-unknown-linux-musl/release/patina
+            artifact_name: patina-linux-x86_64
+            final_name: patina
+          - os: macos-latest
+            target: ""
+            binary_path: target/release/patina
+            artifact_name: patina-macos-arm64
+            final_name: patina
+          - os: windows-latest
+            target: ""
+            binary_path: target\\release\\patina.exe
+            artifact_name: patina-windows-x86_64.exe
+            final_name: patina.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Linux dependencies
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install LLVM tools (Windows)
+        if: matrix.os == 'windows-latest'
+        run: rustup component add llvm-tools-preview
+
+      - name: Build (custom target)
+        if: matrix.target != ''
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (host target)
+        if: matrix.target == ''
+        run: cargo build --release
+
+      - name: Strip binary (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: strip ${{ matrix.binary_path }}
+
+      - name: Strip binary (macOS)
+        if: matrix.os == 'macos-latest'
+        run: strip -x ${{ matrix.binary_path }}
+
+      - name: Strip binary (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $llvmStrip = (rustup which --toolchain stable llvm-objcopy) -replace 'llvm-objcopy', 'llvm-strip.exe'
+          & $llvmStrip $Env:BINARY
+        env:
+          BINARY: ${{ matrix.binary_path }}
+
+      - name: Prepare artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cp ${{ matrix.binary_path }} ${{ matrix.final_name }}
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: Copy-Item $Env:BINARY $Env:FINAL
+        env:
+          BINARY: ${{ matrix.binary_path }}
+          FINAL: ${{ matrix.final_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.final_name }}
+          if-no-files-found: error

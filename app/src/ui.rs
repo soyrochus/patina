@@ -137,11 +137,18 @@ pub struct MenuBarOutput {
 pub struct MenuBar;
 
 impl MenuBar {
-    pub fn show(ui: &mut egui::Ui, state: &mut MenuBarState) -> MenuBarOutput {
+    pub fn show(
+        ui: &mut egui::Ui,
+        state: &mut MenuBarState,
+        logo_texture: Option<&egui::TextureHandle>,
+    ) -> MenuBarOutput {
         let mut output = MenuBarOutput::default();
         egui::menu::bar(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 18.0;
+                if let Some(texture) = logo_texture {
+                    ui.image((texture.id(), egui::vec2(18.0, 18.0)));
+                }
                 ui.label(RichText::new("Patina").strong());
                 ui.menu_button("File", |ui| {
                     if ui.button("New chat\tCtrl+N").clicked() {

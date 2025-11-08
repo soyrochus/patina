@@ -8,7 +8,7 @@ license = "MIT"
 
 [dependencies]
 patina-core = { path = "../core" }
-patina-app = { path = "../app" }
+patina = { path = "../app" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 egui = "0.26"

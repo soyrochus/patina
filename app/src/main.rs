@@ -1,5 +1,5 @@
 use eframe::egui;
-use patina_app::{PatinaEguiApp, UiSettingsStore};
+use patina::{logo_png_bytes, PatinaEguiApp, UiSettingsStore};
 use patina_core::telemetry;
 use patina_core::{llm::LlmDriver, state::AppState, store::TranscriptStore};
 use std::sync::Arc;
@@ -7,8 +7,7 @@ use tokio::runtime::Runtime;
 use tracing_subscriber::EnvFilter;
 
 fn load_application_icon() -> Option<egui::IconData> {
-    let bytes = include_bytes!("../../images/patina-logo-min-transparent.png");
-    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let image = image::load_from_memory(logo_png_bytes()).ok()?.to_rgba8();
     let (width, height) = (image.width(), image.height());
     Some(egui::IconData {
         rgba: image.into_raw(),
