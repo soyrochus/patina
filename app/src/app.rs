@@ -8,6 +8,7 @@ use directories::ProjectDirs;
 use egui::{self, Margin, RichText};
 use egui_commonmark::CommonMarkCache;
 use patina_core::state::AppState;
+use patina_core::LlmStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -128,6 +129,7 @@ impl PatinaEguiApp {
     }
 
     fn layout(&mut self, ctx: &egui::Context) {
+        let llm_status = self.state.llm_status();
         egui::TopBottomPanel::top("menu_bar")
             .frame(
                 egui::Frame::none()
@@ -139,6 +141,17 @@ impl PatinaEguiApp {
                 self.handle_menu_output(output);
                 if let Some(err) = &self.error {
                     ui.colored_label(self.palette.warning, err);
+                }
+                if let LlmStatus::Unconfigured(message) = &llm_status {
+                    ui.add_space(4.0);
+                    ui.colored_label(self.palette.warning, message);
+                    ui.label(
+                        RichText::new(
+                            "Set OPENAI_/AZURE_ env vars or create patina.yaml to enable AI.",
+                        )
+                        .color(self.palette.text_secondary)
+                        .small(),
+                    );
                 }
             });
 

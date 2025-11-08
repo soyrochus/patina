@@ -2,6 +2,12 @@
 
 Patina is a native desktop chat client written in Rust with an `egui` interface and a modular core that supports large language model (LLM) providers and Model Context Protocol (MCP) integrations. The workspace is split into multiple crates to encourage reuse, automated testing, and streamlined tooling.
 
+**Patina Desktop in Light Mode**
+![Patina in Light mode](images/patina-min-light.png)
+
+**Patina Desktop in Dark Mode**
+![Patina in Dark mode](images/patina-min-dark.png)
+
 ## Workspace layout
 
 ```

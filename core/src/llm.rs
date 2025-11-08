@@ -1,7 +1,9 @@
+use crate::config::AiRuntimeSettings;
 use crate::state::{ChatMessage, MessageRole};
-use anyhow::Result;
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -13,16 +15,6 @@ pub enum LlmProviderKind {
     OpenAi,
     AzureOpenAi,
     Mock,
-}
-
-impl LlmProviderKind {
-    pub fn from_environment() -> Self {
-        match std::env::var("LLM_PROVIDER") {
-            Ok(value) if value.eq_ignore_ascii_case("azure_openai") => Self::AzureOpenAi,
-            Ok(value) if value.eq_ignore_ascii_case("mock") => Self::Mock,
-            _ => Self::OpenAi,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +41,12 @@ pub struct ModelUsage {
     pub completion_tokens: usize,
 }
 
+#[derive(Debug, Clone)]
+pub enum LlmStatus {
+    Ready,
+    Unconfigured(String),
+}
+
 #[async_trait]
 pub trait LanguageModelProvider: Send + Sync {
     async fn send_chat(&self, messages: &[ChatMessage], config: &LlmConfig)
@@ -57,83 +55,228 @@ pub trait LanguageModelProvider: Send + Sync {
 
 #[derive(Clone)]
 pub struct LlmDriver {
-    config: LlmConfig,
-    provider: Arc<dyn LanguageModelProvider>,
+    config: Option<LlmConfig>,
+    provider: Option<Arc<dyn LanguageModelProvider>>,
+    status: LlmStatus,
 }
 
 impl LlmDriver {
-    pub fn new(config: LlmConfig, provider: Arc<dyn LanguageModelProvider>) -> Self {
-        Self { config, provider }
+    pub async fn from_environment() -> Self {
+        match AiRuntimeSettings::load() {
+            Ok(settings) => match Self::from_settings(settings).await {
+                Ok(driver) => driver,
+                Err(err) => Self::unconfigured(err.to_string()),
+            },
+            Err(err) => Self::unconfigured(err.user_message()),
+        }
     }
 
-    pub async fn from_environment() -> Self {
-        let provider = LlmProviderKind::from_environment();
-        Self::with_provider(provider, None).await
+    async fn from_settings(settings: AiRuntimeSettings) -> Result<Self> {
+        match settings.provider {
+            LlmProviderKind::OpenAi => {
+                let creds = settings
+                    .openai
+                    .ok_or_else(|| anyhow!("OpenAI credentials missing after resolution"))?;
+                let model = creds
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "gpt-4o-mini".to_string());
+                let client = Client::builder().build()?;
+                let provider = HttpOpenAiProvider::new(client, creds.api_key, model.clone());
+                Ok(Self::ready(
+                    LlmConfig::new(LlmProviderKind::OpenAi, Some(model)),
+                    Arc::new(provider),
+                ))
+            }
+            LlmProviderKind::AzureOpenAi => {
+                let creds = settings
+                    .azure
+                    .ok_or_else(|| anyhow!("Azure OpenAI credentials missing after resolution"))?;
+                let client = Client::builder().build()?;
+                let deployment = creds.deployment_name.clone();
+                let provider = HttpAzureOpenAiProvider::new(
+                    client,
+                    creds.endpoint,
+                    creds.api_key,
+                    creds.api_version,
+                    deployment.clone(),
+                );
+                Ok(Self::ready(
+                    LlmConfig::new(LlmProviderKind::AzureOpenAi, Some(deployment)),
+                    Arc::new(provider),
+                ))
+            }
+            LlmProviderKind::Mock => Ok(Self::configured_mock(settings.model)),
+        }
     }
 
     pub async fn with_provider(provider: LlmProviderKind, model: Option<String>) -> Self {
         match provider {
-            LlmProviderKind::OpenAi => {
-                let config = LlmConfig::new(
-                    provider,
-                    model.or_else(|| std::env::var("OPENAI_MODEL").ok()),
-                );
-                Self::new(config, Arc::new(OpenAiProvider))
-            }
-            LlmProviderKind::AzureOpenAi => {
-                let config = LlmConfig::new(
-                    provider,
-                    model.or_else(|| std::env::var("AZURE_OPENAI_DEPLOYMENT_NAME").ok()),
-                );
-                Self::new(config, Arc::new(AzureOpenAiProvider))
-            }
-            LlmProviderKind::Mock => {
-                let config = LlmConfig::new(provider, model);
-                Self::new(config, Arc::new(MockProvider::default()))
-            }
+            LlmProviderKind::Mock => Self::configured_mock(model),
+            _ => Self::from_environment().await,
         }
     }
 
     pub async fn fake() -> Self {
-        Self::with_provider(LlmProviderKind::Mock, Some("mock".into())).await
+        Self::configured_mock(Some("mock".into()))
     }
 
-    pub fn provider_kind(&self) -> LlmProviderKind {
-        self.config.provider.clone()
+    pub fn provider_kind(&self) -> Option<LlmProviderKind> {
+        self.config.as_ref().map(|cfg| cfg.provider.clone())
+    }
+
+    pub fn status(&self) -> LlmStatus {
+        self.status.clone()
     }
 
     pub async fn respond(&self, history: &[ChatMessage]) -> Result<ChatResponse> {
-        self.provider.send_chat(history, &self.config).await
+        match (&self.provider, &self.config) {
+            (Some(provider), Some(config)) => provider.send_chat(history, config).await,
+            _ => {
+                let message = match &self.status {
+                    LlmStatus::Ready => "AI driver not initialized".to_string(),
+                    LlmStatus::Unconfigured(msg) => msg.clone(),
+                };
+                bail!(message);
+            }
+        }
+    }
+
+    fn ready(config: LlmConfig, provider: Arc<dyn LanguageModelProvider>) -> Self {
+        Self {
+            config: Some(config),
+            provider: Some(provider),
+            status: LlmStatus::Ready,
+        }
+    }
+
+    fn unconfigured(message: impl Into<String>) -> Self {
+        Self {
+            config: None,
+            provider: None,
+            status: LlmStatus::Unconfigured(message.into()),
+        }
+    }
+
+    fn configured_mock(model: Option<String>) -> Self {
+        Self::ready(
+            LlmConfig::new(LlmProviderKind::Mock, model),
+            Arc::new(MockProvider::default()),
+        )
     }
 }
 
-struct OpenAiProvider;
-struct AzureOpenAiProvider;
+struct HttpOpenAiProvider {
+    client: Client,
+    api_key: String,
+    model: String,
+}
+
+impl HttpOpenAiProvider {
+    fn new(client: Client, api_key: String, model: String) -> Self {
+        Self {
+            client,
+            api_key,
+            model,
+        }
+    }
+}
+
+#[async_trait]
+impl LanguageModelProvider for HttpOpenAiProvider {
+    async fn send_chat(
+        &self,
+        messages: &[ChatMessage],
+        config: &LlmConfig,
+    ) -> Result<ChatResponse> {
+        let request = OpenAiChatRequest {
+            model: self.model.clone(),
+            messages: map_messages(messages),
+        };
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .bearer_auth(&self.api_key)
+            .json(&request)
+            .send()
+            .await
+            .context("OpenAI request failed")?
+            .error_for_status()
+            .context("OpenAI returned an error status")?;
+        let payload: ChatCompletionResponse = response
+            .json()
+            .await
+            .context("OpenAI response decoding failed")?;
+        completion_to_chat(payload, config)
+    }
+}
+
+struct HttpAzureOpenAiProvider {
+    client: Client,
+    endpoint: String,
+    api_key: String,
+    api_version: String,
+    deployment_name: String,
+}
+
+impl HttpAzureOpenAiProvider {
+    fn new(
+        client: Client,
+        endpoint: String,
+        api_key: String,
+        api_version: String,
+        deployment_name: String,
+    ) -> Self {
+        Self {
+            client,
+            endpoint,
+            api_key,
+            api_version,
+            deployment_name,
+        }
+    }
+
+    fn request_url(&self) -> String {
+        let base = self.endpoint.trim_end_matches('/');
+        format!(
+            "{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}",
+            base = base,
+            deployment = self.deployment_name,
+            api_version = self.api_version
+        )
+    }
+}
+
+#[async_trait]
+impl LanguageModelProvider for HttpAzureOpenAiProvider {
+    async fn send_chat(
+        &self,
+        messages: &[ChatMessage],
+        config: &LlmConfig,
+    ) -> Result<ChatResponse> {
+        let request = AzureChatRequest {
+            messages: map_messages(messages),
+        };
+        let response = self
+            .client
+            .post(self.request_url())
+            .header("api-key", &self.api_key)
+            .json(&request)
+            .send()
+            .await
+            .context("Azure OpenAI request failed")?
+            .error_for_status()
+            .context("Azure OpenAI returned an error status")?;
+        let payload: ChatCompletionResponse = response
+            .json()
+            .await
+            .context("Azure OpenAI response decoding failed")?;
+        completion_to_chat(payload, config)
+    }
+}
 
 #[derive(Default)]
 struct MockProvider;
-
-#[async_trait]
-impl LanguageModelProvider for OpenAiProvider {
-    async fn send_chat(
-        &self,
-        messages: &[ChatMessage],
-        config: &LlmConfig,
-    ) -> Result<ChatResponse> {
-        synthetic_response("OpenAI", messages, config).await
-    }
-}
-
-#[async_trait]
-impl LanguageModelProvider for AzureOpenAiProvider {
-    async fn send_chat(
-        &self,
-        messages: &[ChatMessage],
-        config: &LlmConfig,
-    ) -> Result<ChatResponse> {
-        synthetic_response("Azure OpenAI", messages, config).await
-    }
-}
 
 #[async_trait]
 impl LanguageModelProvider for MockProvider {
@@ -144,6 +287,94 @@ impl LanguageModelProvider for MockProvider {
     ) -> Result<ChatResponse> {
         synthetic_response("Mock", messages, config).await
     }
+}
+
+#[derive(Serialize)]
+struct OpenAiChatRequest {
+    model: String,
+    messages: Vec<CompletionRequestMessage>,
+}
+
+#[derive(Serialize)]
+struct AzureChatRequest {
+    messages: Vec<CompletionRequestMessage>,
+}
+
+#[derive(Serialize)]
+struct CompletionRequestMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<CompletionChoice>,
+    usage: Option<CompletionUsage>,
+}
+
+#[derive(Deserialize)]
+struct CompletionChoice {
+    message: CompletionResponseMessage,
+}
+
+#[derive(Deserialize)]
+struct CompletionResponseMessage {
+    #[allow(dead_code)]
+    role: String,
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CompletionUsage {
+    prompt_tokens: Option<usize>,
+    completion_tokens: Option<usize>,
+}
+
+fn map_messages(messages: &[ChatMessage]) -> Vec<CompletionRequestMessage> {
+    messages
+        .iter()
+        .map(|message| CompletionRequestMessage {
+            role: api_role(&message.role),
+            content: message.content.clone(),
+        })
+        .collect()
+}
+
+fn api_role(role: &MessageRole) -> String {
+    match role {
+        MessageRole::System => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
+    }
+    .to_string()
+}
+
+fn completion_to_chat(payload: ChatCompletionResponse, _config: &LlmConfig) -> Result<ChatResponse> {
+    let choice = payload
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("response contained no choices"))?;
+    let content = choice
+        .message
+        .content
+        .unwrap_or_else(|| "[empty response]".to_string());
+    let reply = ChatMessage {
+        id: Uuid::new_v4(),
+        role: MessageRole::Assistant,
+        content,
+        created_at: Utc::now(),
+        tool_calls: Vec::new(),
+    };
+    let usage = payload.usage.map(|usage| ModelUsage {
+        prompt_tokens: usage.prompt_tokens.unwrap_or(0),
+        completion_tokens: usage.completion_tokens.unwrap_or(0),
+    });
+    Ok(ChatResponse {
+        message: reply,
+        usage,
+    })
 }
 
 async fn synthetic_response(

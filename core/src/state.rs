@@ -1,4 +1,4 @@
-use crate::llm::LlmDriver;
+use crate::llm::{LlmDriver, LlmStatus};
 use crate::store::TranscriptStore;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -295,6 +295,10 @@ impl AppState {
         let id = inner.conversations[0].id;
         inner.current_session = Some(id);
         &mut inner.conversations[0]
+    }
+
+    pub fn llm_status(&self) -> LlmStatus {
+        self.llm.status()
     }
 }
 

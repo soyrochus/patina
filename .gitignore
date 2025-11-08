@@ -1,1 +1,7 @@
 /target
+
+
+# Local config file
+# Env variables 
+.env
+
