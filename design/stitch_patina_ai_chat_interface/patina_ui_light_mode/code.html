@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Patina</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#4F46E5",
+            "background-light": "#FFFFFF",
+            "background-dark": "#1F1F1F",
+            "sidebar-light": "#F3F4F6",
+            "sidebar-dark": "#272727",
+            "chat-bubble-user-light": "#F3F4F6",
+            "chat-bubble-user-dark": "#374151",
+            "chat-bubble-ai-light": "#FFFFFF",
+            "chat-bubble-ai-dark": "#262626",
+            "border-light": "#E5E7EB",
+            "border-dark": "#374151",
+            "text-primary-light": "#111827",
+            "text-primary-dark": "#F9FAFB",
+            "text-secondary-light": "#6B7280",
+            "text-secondary-dark": "#9CA3AF",
+            "input-light": "#FFFFFF",
+            "input-dark": "#313131",
+          },
+          fontFamily: {
+            sans: ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.5rem",
+          },
+        },
+      },
+    };
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings:
+      'FILL' 0,
+      'wght' 400,
+      'GRAD' 0,
+      'opsz' 24
+    }
+  </style>
+</head>
+<body class="font-sans bg-background-light dark:bg-background-dark text-text-primary-light dark:text-text-primary-dark antialiased">
+<div class="flex h-screen w-screen flex-col">
+<header class="flex h-10 flex-shrink-0 items-center justify-between border-b border-border-light dark:border-border-dark bg-sidebar-light dark:bg-sidebar-dark px-4">
+<div class="flex items-center space-x-4 text-sm">
+<span class="font-bold">Patina</span>
+<a class="hover:text-primary" href="#">File</a>
+<a class="hover:text-primary" href="#">Edit</a>
+<a class="hover:text-primary" href="#">View</a>
+<a class="hover:text-primary" href="#">Help</a>
+</div>
+<div class="flex items-center space-x-1 rounded border border-border-light dark:border-border-dark p-0.5">
+<button class="rounded-sm p-1 hover:bg-gray-200 dark:hover:bg-gray-600" id="light-theme-button">
+<span class="material-symbols-outlined text-base">light_mode</span>
+</button>
+<button class="rounded-sm bg-gray-200 dark:bg-gray-900 p-1" id="dark-theme-button">
+<span class="material-symbols-outlined text-base">dark_mode</span>
+</button>
+<button class="rounded-sm p-1 hover:bg-gray-200 dark:hover:bg-gray-600" id="auto-theme-button">
+<span class="material-symbols-outlined text-base">desktop_windows</span>
+</button>
+</div>
+</header>
+<div class="flex flex-grow overflow-hidden">
+<aside class="w-72 flex-shrink-0 bg-sidebar-light dark:bg-sidebar-dark p-3 transition-all duration-300" id="sidebar">
+<div class="flex h-full flex-col">
+<div class="relative mb-4">
+<span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary-light dark:text-text-secondary-dark">search</span>
+<input class="w-full rounded border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark py-2 pl-10 pr-4 text-sm focus:border-primary focus:ring-primary" placeholder="Search..." type="text"/>
+</div>
+<div class="mb-4">
+<h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary-light dark:text-text-secondary-dark px-2">MCP connections</h2>
+<ul>
+<li>
+<a class="flex items-start rounded p-2 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">
+<div class="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-green-500"></div>
+<div class="ml-3">
+<p class="text-sm font-medium">GitHub</p>
+<p class="text-xs text-text-secondary-light dark:text-text-secondary-dark">Official GitHub MCP Server that connects github</p>
+</div>
+</a>
+</li>
+<li>
+<a class="flex items-start rounded p-2 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">
+<div class="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-green-500"></div>
+<div class="ml-3">
+<p class="text-sm font-medium">Playwright</p>
+<p class="text-xs text-text-secondary-light dark:text-text-secondary-dark">Automate web browsers using accessibility</p>
+</div>
+</a>
+</li>
+</ul>
+</div>
+<div class="flex flex-grow flex-col overflow-hidden">
+<h2 class="mb-2 flex-shrink-0 px-2 text-xs font-semibold uppercase tracking-wider text-text-secondary-light dark:text-text-secondary-dark">Chats</h2>
+<div class="flex-grow overflow-y-auto pr-1">
+<ul class="space-y-1 text-sm">
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Ubuntu upgrade issues</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Historia divertida en español</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Rust egui chat client</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Reinitiate OAuth flow</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">PowerPoint slide breakdown</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Translate to Spanish</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Skills - AI impact on roles</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">OpenAI restructures; Micro...</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Extensive report summary</a></li>
+<li><a class="block truncate rounded bg-gray-300 dark:bg-gray-700 px-2 py-1.5 font-semibold" href="#">Catholic remarriage process</a></li>
+<li><a class="block truncate rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700/50" href="#">Draw a Tarot card</a></li>
+</ul>
+</div>
+</div>
+</div>
+</aside>
+<main class="flex flex-1 flex-col overflow-hidden">
+<div class="flex flex-1 flex-col overflow-y-auto p-6 md:p-8 lg:p-12">
+<div class="flex-grow space-y-8">
+<div class="flex justify-end">
+<div class="max-w-xl lg:max-w-2xl">
+<div class="rounded-lg bg-chat-bubble-user-light dark:bg-chat-bubble-user-dark p-4 shadow-sm">
+<p class="text-sm">"If you, as a woman, a Catholic woman in Spain, marry a civil, not in a church, and your husband divorces you, can you then marry again, but then in a Catholic church?"</p>
+</div>
+<div class="mt-1 flex justify-end items-center space-x-2">
+<span class="material-symbols-outlined text-sm text-text-secondary-light dark:text-text-secondary-dark">schedule</span>
+<span class="text-xs text-text-secondary-light dark:text-text-secondary-dark">00:14</span>
+</div>
+</div>
+</div>
+<div class="flex justify-start">
+<div class="max-w-xl lg:max-w-3xl">
+<div class="rounded-lg bg-chat-bubble-ai-light dark:bg-chat-bubble-ai-dark p-4 shadow-sm border border-border-light dark:border-border-dark">
+<div class="prose prose-sm dark:prose-invert max-w-none text-text-primary-light dark:text-text-primary-dark">
+<p>So the short version is: yes, it's possible, but it involves a bit of a process.</p>
+<p>In the Catholic Church, if your first marriage wasn't a Catholic sacramental marriage—meaning it wasn't done in the church and wasn't recognized as a sacrament—then the Church generally views it as a civil contract. That means after a civil divorce, you can often marry in the Catholic Church because, in the Church's eyes, you weren't sacramentally married before.</p>
+<p>You'll likely need to speak with a priest and go through some pastoral guidance or paperwork to confirm the situation, but generally, yes, you can marry again in the Church after a civil-only marriage and divorce.</p>
+</div>
+</div>
+<div class="mt-2 flex items-center space-x-3 text-text-secondary-light dark:text-text-secondary-dark">
+<button class="hover:text-primary"><span class="material-symbols-outlined text-lg">content_copy</span></button>
+<button class="hover:text-primary"><span class="material-symbols-outlined text-lg">thumb_up</span></button>
+<button class="hover:text-primary"><span class="material-symbols-outlined text-lg">thumb_down</span></button>
+<button class="hover:text-primary"><span class="material-symbols-outlined text-lg">share</span></button>
+<button class="hover:text-primary"><span class="material-symbols-outlined text-lg">more_horiz</span></button>
+</div>
+</div>
+</div>
+<div class="flex justify-end">
+<div class="max-w-xl lg:max-w-2xl">
+<div class="rounded-lg bg-chat-bubble-user-light dark:bg-chat-bubble-user-dark p-4 shadow-sm">
+<p class="text-sm">"typically explaining why you didn't marry in the church in the first place."</p>
+</div>
+<div class="mt-1 flex justify-end items-center space-x-2">
+<span class="material-symbols-outlined text-sm text-text-secondary-light dark:text-text-secondary-dark">schedule</span>
+<span class="text-xs text-text-secondary-light dark:text-text-secondary-dark">00:03</span>
+</div>
+</div>
+</div>
+<div class="flex justify-start">
+<div class="max-w-xl lg:max-w-3xl">
+<div class="rounded-lg bg-chat-bubble-ai-light dark:bg-chat-bubble-ai-dark p-4 shadow-sm border border-border-light dark:border-border-dark">
+<p class="text-sm">Yeah, that's definitely a common step. Usually, the priest or whoever is guiding you will just have a conversation with you about it.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="flex-shrink-0 p-4 md:px-8">
+<div class="mx-auto max-w-3xl">
+<div class="rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark p-2 shadow-sm">
+<textarea class="w-full resize-none border-0 bg-transparent p-2 text-sm focus:ring-0 text-text-primary-light dark:text-text-primary-dark placeholder-text-secondary-light dark:placeholder-text-secondary-dark" placeholder="How can I help you today?" rows="1"></textarea>
+<div class="mt-2 flex items-center justify-between p-2">
+<div class="flex items-center space-x-2">
+<button class="rounded p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600">
+<span class="material-symbols-outlined text-lg text-text-secondary-light dark:text-text-secondary-dark">add</span>
+</button>
+<button class="rounded p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600">
+<span class="material-symbols-outlined text-lg text-text-secondary-light dark:text-text-secondary-dark">terminal</span>
+</button>
+<button class="rounded p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600">
+<span class="material-symbols-outlined text-lg text-text-secondary-light dark:text-text-secondary-dark">history</span>
+</button>
+</div>
+<div class="flex items-center space-x-4">
+<button class="flex items-center space-x-1 rounded px-2 py-1 text-sm text-text-secondary-light dark:text-text-secondary-dark hover:bg-gray-200 dark:hover:bg-gray-600">
+<span>Sonnet 4.5</span>
+<span class="material-symbols-outlined text-base">expand_more</span>
+</button>
+<button class="rounded-md bg-primary p-2 text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50">
+<span class="material-symbols-outlined text-xl">arrow_upward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+<script>
+    // Theme toggle logic
+    const lightBtn = document.getElementById('light-theme-button');
+    const darkBtn = document.getElementById('dark-theme-button');
+    const autoBtn = document.getElementById('auto-theme-button');
+    const allBtns = [lightBtn, darkBtn, autoBtn];
+    function updateButtonStyles(activeButton) {
+        allBtns.forEach(btn => {
+            btn.classList.remove('bg-gray-200', 'dark:bg-gray-900');
+            btn.classList.add('hover:bg-gray-200', 'dark:hover:bg-gray-600');
+        });
+        activeButton.classList.add('bg-gray-200', 'dark:bg-gray-900');
+        activeButton.classList.remove('hover:bg-gray-200', 'dark:hover:bg-gray-600');
+    }
+    lightBtn.addEventListener('click', () => {
+        document.documentElement.classList.remove('dark');
+        localStorage.theme = 'light';
+        updateButtonStyles(lightBtn);
+    });
+    darkBtn.addEventListener('click', () => {
+        document.documentElement.classList.add('dark');
+        localStorage.theme = 'dark';
+        updateButtonStyles(darkBtn);
+    });
+    autoBtn.addEventListener('click', () => {
+        localStorage.removeItem('theme');
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+        updateButtonStyles(autoBtn);
+    });
+    // Set initial theme based on localStorage or system preference
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+        updateButtonStyles(localStorage.theme ? darkBtn : autoBtn);
+    } else {
+        document.documentElement.classList.remove('dark');
+        updateButtonStyles(localStorage.theme ? lightBtn : autoBtn);
+    }
+  </script>
+
+</body></html>
