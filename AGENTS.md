@@ -1,159 +1,192 @@
-# Build Patina: Rust egui Desktop Chat Client with MCP and Auth Modes
+General implementation description in [Previous Agents.md](prompts/2025-11-08-01.AGENTS.md). Do not change these general aspects except when requested in this prompt, below:
 
-> Use this prompt verbatim to implement the application. You are an advanced code generation agent. Produce production-grade code, docs, and tests. Follow the constraints precisely. Ask no questions unless the requirement is genuinely ambiguous.
 
----
-
-## Objective
-
-Implement **Patina**, a native desktop chat client in **Rust** with **egui** UI that replicates a ChatGPT-like experience, supports **tool use via MCP**, and implements **two authentication modes** for MCP-connected backends:
-
-1. **Server-managed OAuth** — The MCP server owns OAuth with third-party services (e.g., Atlassian Jira/Confluence). The desktop client authenticates to the MCP via an MCP client credential (e.g., static bearer/API key). First-time backend OAuth is a browser flow triggered by the MCP server; thereafter the server uses a stored refresh token. The client should reconnect later with no additional prompts.
-2. **Client-managed OAuth with credential pass-through** — The desktop client runs a PKCE browser flow, stores tokens in the OS keychain, and injects access tokens to the MCP server if the MCP advertises credential pass-through for its backends.
-
-The app must auto-connect to all configured MCP endpoints and maintain seamless re-use of auth state over days or weeks within token expiry rules.
+Here’s a **complete prompt** you can use for a code-generation agent (e.g., OpenAI’s Codex or Claude Code) to design a **new egui-based UI** for *Patina*, based on the image and your clarified requirements. It’s phrased to generate both code and behavior with flexibility for dark/light/system themes, a collapsible sidebar, and a clean layout.
 
 ---
 
-## High-level capabilities
+## **Prompt: Build Patina egui Interface (Desktop Chat Client with MCP Sidebar)**
 
-* Chat UI with streaming responses and tool-use blocks (ChatGPT-like UX).
-* Pluggable LLM providers (OpenAI and Azure OpenAI through a unified driver).
-* MCP client over **stdio** initially; extensible to **WebSocket**. JSON-RPC 2.0 request/response handling.
-* Capability-driven auth handshake: detect per-MCP `auth_mode` and behave accordingly.
-* Persistent sessions and settings. Clean separation of UI, state, providers, MCP, and credentials.
+You are an advanced Rust + egui developer. Implement a modern, clean, and modular desktop UI for **Patina**, an AI chat client with MCP integrations. The current UI is not acceptable — rebuild it according to the following detailed functional and aesthetic specification.
 
 ---
 
-## Workspace architecture
+### **General structure**
 
-Patina must be implemented as a **multi-crate Cargo workspace**. This allows modularity, reuse, and automated testing.
+* Use **egui** (via eframe) for rendering.
+* Respect **system theme**: follow light/dark preference automatically, with manual override in the app menu (“Theme: System / Light / Dark”).
+* Target resolution: scalable layout, responsive to window resizing (minimum 1024×720).
+* Font and color palette must be consistent (no mixed contrast); prefer soft neutrals in dark mode and off-white in light mode.
 
-### Layout
+---
+
+### **Layout overview**
+
+Check screen mockups:
+
+- ![Light mode](design/stitch_patina_ai_chat_interface/patina_ui_light_mode/screen.png)
+
+
+- ![Darmk mode](design/stitch_patina_ai_chat_interface/patina_ui_dark_mode/screen.png)
+
+
+
+Use a **three-region layout**:
 
 ```
-patina/                     # Workspace root
-├── Cargo.toml              # [workspace] declaration
-├── app/                    # GUI binary crate (egui + orchestration)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs
-│       └── app.rs
-├── core/                   # Core library crate (state, llm, mcp, auth, store)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── state.rs
-│       ├── llm.rs
-│       ├── mcp.rs
-│       ├── auth.rs
-│       ├── store.rs
-│       └── telemetry.rs
-├── tests/                  # Integration, unit, and e2e test crate
-│   ├── Cargo.toml
-│   └── src/
-│       ├── unit/*
-│       ├── integration/*
-│       └── e2e/*
-└── xtask/                  # Optional helper binary for automation
-    ├── Cargo.toml
-    └── src/main.rs
+┌──────────────────────────────────────────────────────────────┐
+│ Menu bar (File, Edit, View, Help, Theme selector checkbox)   │
+├──────────────────────────────────────────────────────────────┤
+│ Left sidebar (collapsible)   │   Chat area (central panel)   │
+│                              │                               │
+│                              │                               │
+└───────────────────────────────┴───────────────────────────────┘
 ```
 
-* **app/** – contains the egui front end, main event loop, and user interaction logic.
-* **core/** – implements reusable logic for LLM calls, MCP communication, state management, auth flows, storage, etc.
-* **tests/** – orchestrates integration and end-to-end tests (including mocks).
-* **xtask/** – provides helper utilities (e.g., start mock servers, generate fixtures, CI smoke tests).
+#### **Top menu bar**
 
-Each crate has its own `src/` directory, adhering to Cargo best practices.
+* Traditional menu with items: **File**, **Edit**, **View**, **Help**.
+* On the far right: a **Theme selector** (toggle or combo box):
 
----
+  * System (default)
+  * Light
+  * Dark
 
-## Configuration and environment variables
+#### **Left sidebar**
 
-Patina supports both OpenAI and Azure OpenAI via a single driver. The configuration can come from a `.env` file, environment variables, or `settings.toml`.
+* Collapsible panel (can be hidden or resized with a handle).
+* Structured vertically in three sections:
 
-### Example
+  1. **Search box** – single-line text input with a magnifier icon.
+  2. **MCP section** – list of configured MCP connectors.
 
-```bash
-LLM_PROVIDER="azure_openai"        # or: "openai"
-# Azure OpenAI
-AZURE_OPENAI_API_KEY=SECRET_KEY_REDACTED_FOR_SAFETY
-AZURE_OPENAI_ENDPOINT=https://[your_azure_deployment].azure.com/
-AZURE_OPENAI_API_VERSION=2024-12-01-preview
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
+     * Title “MCP” in small bold text.
+     * Each MCP has:
 
-# OpenAI
-OPENAI_API_KEY=SECRET_KEY_REDACTED_FOR_SAFETY
-```
+       * Name (e.g., “GitHub”, “Playwright”)
+       * Subtitle (short description)
+       * Status indicator (connected / disconnected dot).
+  3. **Chats section** – scrollable list of recent chats.
 
-The driver auto-detects `LLM_PROVIDER` and adjusts headers and endpoints accordingly.
+     * Title “Chats”.
+     * Each entry shows:
 
----
+       * Chat title.
+       * Optional date/time or last message snippet.
+       * Click → load conversation in main panel.
+     * Supports right-click context menu (rename, delete, pin).
 
-## Authentication requirements
-
-*(Retains prior details for both server-managed and client-managed modes.)*
-
----
-
-## Markdown rendering with syntax highlighting
-
-* Use `egui_commonmark` for markdown parsing.
-* Integrate `syntect` for fenced code block highlighting with theme cache.
-* Use async background rendering for long messages.
+Include **visual grouping and small spacing** between sections.
+Provide **collapsible subpanels** for MCPs and Chats individually.
 
 ---
 
-## Chat history and persistence
+### **Right (main) chat area**
 
-* Store per-session transcript as `.jsonl` under the workspace data directory.
-* Implement lazy loading, search, and export/import features.
+#### **Chat history**
 
----
+* Central panel showing the **conversation history** of the active chat.
+* Messages alternate left/right alignment:
 
-## Testing strategy and automation
+  * **User messages** (right-aligned, white bubble, compact border, subtle shadow).
+  * **AI messages** (left-aligned, darker bubble, adaptive to theme).
+* Messages support:
 
-* Unit, integration, end-to-end, and UI snapshot tests live in `tests/`.
-* Each core component (`auth`, `llm`, `mcp`, `state`) has independent unit tests.
-* The `tests` crate launches a mock MCP server to validate OAuth flows, tool calls, reconnect, and persistence.
-* A headless **smoke test** runs via `cargo run -p xtask -- smoke` that launches mocks, starts Patina in headless mode, performs scripted interactions, validates logs, and exits with code 0 on success.
+  * Markdown rendering (via `egui_commonmark`).
+  * Code fences with syntax highlighting (`syntect` integration).
+  * Copy-to-clipboard icon for code blocks.
+  * Optional token/latency footer line (small font).
+* Chat history must be **scrollable** with smooth inertia.
+* Support **lazy loading** for older messages when scrolling up.
 
-### CI workflow
+#### **Input box**
 
-* GitHub Actions CI defined at workspace root:
+At the bottom of the chat panel:
 
-  * `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
-  * `cargo test --workspace --all-features`
-  * Run smoke test via `xtask` on Ubuntu, macOS, Windows.
-  * Upload logs, UI snapshots, and golden transcripts.
+* **Multi-line text area** (expandable on Enter).
+* On the right side: **Send button** (paper-plane icon).
+* Below or to the side: a **toolbar row** with:
 
----
-
-## Acceptance criteria
-
-*(As defined earlier, unchanged)*
-
----
-
-## Stretch goals
-
-*(As defined earlier, unchanged)*
+  * Model selector dropdown (e.g., `gpt-4o`, `gpt-4.5-turbo`, `custom`).
+  * Temperature slider (optional).
+  * Tool selector (toggle buttons for “Tools”, “MCPs”, “Files”, etc.).
+  * Character count and token estimate indicator (small text on the right).
+* Input retains content between sends until cleared manually.
 
 ---
 
-## Implementation guidance
+### **Color and theme design**
 
-* Multi-crate modular design for maintainability and reuse.
-* Each crate has its own `src/` root.
-* Workspace root (`patina/`) holds `Cargo.toml` with `[workspace]` members.
-* Core logic must compile independently for testing without GUI.
-* `xtask` automates mock server management and CI checks.
-* Add provider conformance tests for both OpenAI and Azure OpenAI streaming paths.
-* Add UI snapshot tests to validate syntax highlighting and long-history virtualization.
+#### **Dark mode (default)**
 
+* Background: `#1E1E1E`
+* Sidebar: `#252526`
+* Chat user bubbles: `#3A3D41`
+* Chat AI bubbles: `#2D2D30`
+* Accent (selection, highlights): `#0078D7`
+* Text: near-white `#E6E6E6`
+* Subtle dividers, shadows, and focus outlines.
 
-## README
+#### **Light mode**
 
-Create a README.md describing the full app according to standards common on Github. Description, installation, manual etc
+* Background: `#FFFFFF`
+* Sidebar: `#F3F3F3`
+* Chat user bubbles: `#E5E5E5`
+* Chat AI bubbles: `#F9F9F9`
+* Accent: `#0063B1`
+* Text: `#202020`
 
+#### **System mode**
+
+* Follows OS theme dynamically. Use `eframe::NativeOptions::default_theme()` if available.
+
+---
+
+### **Behavior and interactivity**
+
+* Sidebar collapsible via small chevron button.
+* Search filters both MCP and chat sections dynamically.
+* Clicking MCP → opens settings popover (API key, auth status, reconnect).
+* Drag-and-drop ordering of chats.
+* Keyboard shortcuts:
+
+  * `Ctrl+K` focus search.
+  * `Ctrl+N` new chat.
+  * `Ctrl+M` toggle sidebar.
+  * `Ctrl+Enter` send message.
+
+---
+
+### **Persistence and state**
+
+* Remember sidebar visibility, selected theme, and window size across restarts.
+* Chat history persists per session (stored JSONL).
+* Last active conversation reopens automatically.
+
+---
+
+### **Testing & rendering**
+
+* Ensure performance for 1000+ messages.
+* Use off-screen rendering for snapshot tests (UI regression).
+* All UI components must compile with `--features "egui_commonmark,syntect"` enabled.
+
+---
+
+### **Deliverables**
+
+* Implement `ui.rs` and supporting structs (`Sidebar`, `ChatPanel`, `InputBar`, `MenuBar`).
+* Provide a `render_ui(ctx, app_state)` entrypoint in `app/src/app.rs`.
+* Include dark/light theme definitions as constants.
+* Add snapshot tests under `tests/ui_snapshots/`.
+* Follow idiomatic egui layout (panels, top_bottom, side_panel, central_panel).
+
+---
+
+### **Style goals**
+
+* Visually cohesive, minimalistic, and efficient.
+* Functional hierarchy: menu > sidebar > chat.
+* Adaptive, not flashy. Inspired by VS Code or modern ChatGPT desktop clients.
+
+=

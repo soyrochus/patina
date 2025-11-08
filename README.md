@@ -93,6 +93,16 @@ Provides automation entry points. `cargo run -p xtask -- smoke` spins up the cor
 3. Add tests for any new functionality in the appropriate crate.
 4. Use `cargo run -p xtask -- smoke` to validate end-to-end behavior.
 
-## License
 
-Dual-licensed under MIT or Apache-2.0 at your option.
+## Principles of Participation
+
+Everyone is invited and welcome to contribute: open issues, propose pull requests, share ideas, or help improve documentation. Participation is open to all, regardless of background or viewpoint.
+
+This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md), which affirms respect for people, freedom to critique ideas, and space for diverse perspectives. 
+
+
+## License and Copyright
+
+Copyright (c) 2025, Iwan van der Kleijn
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

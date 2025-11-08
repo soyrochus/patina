@@ -8,5 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 patina-core = { path = "../core" }
+patina-app = { path = "../app" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
+egui = "0.26"

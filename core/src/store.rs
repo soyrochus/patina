@@ -1,6 +1,7 @@
 use crate::state::{ChatMessage, Conversation};
 use anyhow::Result;
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -24,6 +25,11 @@ impl Default for TranscriptStore {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct ConversationMetadata {
+    title: String,
+}
+
 impl TranscriptStore {
     pub fn new(root: PathBuf) -> Self {
         fs::create_dir_all(root.join("conversations")).ok();
@@ -43,6 +49,16 @@ impl TranscriptStore {
 
     fn conversation_dir(&self) -> PathBuf {
         self.root.join("conversations")
+    }
+
+    fn metadata_path(&self, id: Uuid) -> PathBuf {
+        self.conversation_dir().join(format!("{}.meta.json", id))
+    }
+
+    fn read_metadata(&self, id: Uuid) -> Option<ConversationMetadata> {
+        let path = self.metadata_path(id);
+        let contents = fs::read_to_string(path).ok()?;
+        serde_json::from_str(&contents).ok()
     }
 
     pub fn load_conversations(&self) -> Result<Vec<Conversation>> {
@@ -71,7 +87,10 @@ impl TranscriptStore {
                     continue;
                 }
                 let message: ChatMessage = serde_json::from_str(&line)?;
-                conversation.add_message(message);
+                let _ = conversation.add_message(message);
+            }
+            if let Some(meta) = self.read_metadata(id) {
+                conversation.title = meta.title;
             }
             conversations.push(conversation);
         }
@@ -88,6 +107,26 @@ impl TranscriptStore {
         let serialized = serde_json::to_vec(message)?;
         file.write_all(&serialized)?;
         file.write_all(b"\n")?;
+        Ok(())
+    }
+
+    pub fn persist_metadata(&self, conversation: &Conversation) -> Result<()> {
+        let meta = ConversationMetadata {
+            title: conversation.title.clone(),
+        };
+        let path = self.metadata_path(conversation.id);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        let serialized = serde_json::to_vec_pretty(&meta)?;
+        fs::write(path, serialized)?;
+        Ok(())
+    }
+
+    pub fn delete_conversation(&self, id: Uuid) -> Result<()> {
+        let transcript_path = self.conversation_dir().join(format!("{}.jsonl", id));
+        let _ = fs::remove_file(transcript_path);
+        let _ = fs::remove_file(self.metadata_path(id));
         Ok(())
     }
 

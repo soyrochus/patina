@@ -785,6 +785,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "pulldown-cmark",
+ "syntect",
 ]
 
 [[package]]
@@ -1995,6 +1996,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "directories",
  "eframe",
  "egui",
@@ -2037,6 +2039,8 @@ name = "patina-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "egui",
+ "patina-app",
  "patina-core",
  "tokio",
 ]

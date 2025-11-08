@@ -102,15 +102,18 @@ impl Conversation {
         }
     }
 
-    pub fn add_message(&mut self, mut message: ChatMessage) {
+    pub fn add_message(&mut self, mut message: ChatMessage) -> bool {
+        let mut title_changed = false;
         if self.messages.is_empty() && message.role == MessageRole::User {
             self.title = snippet(&message.content);
+            title_changed = true;
         }
         if message.tool_calls.is_empty() {
             message.tool_calls = Vec::new();
         }
         self.messages.push(message);
         self.updated_at = Utc::now();
+        title_changed
     }
 }
 
@@ -183,6 +186,9 @@ impl AppState {
         inner.conversations.insert(0, Conversation::new());
         let id = inner.conversations[0].id;
         inner.current_session = Some(id);
+        if let Err(err) = self.store.persist_metadata(&inner.conversations[0]) {
+            tracing::warn!(%err, "failed to persist new conversation metadata");
+        }
         id
     }
 
@@ -196,8 +202,11 @@ impl AppState {
         let conversation_id = {
             let mut inner = self.inner.write();
             let conversation = Self::ensure_conversation(&mut inner);
-            conversation.add_message(message.clone());
+            let title_changed = conversation.add_message(message.clone());
             self.store.append_message(conversation.id, &message)?;
+            if title_changed {
+                self.store.persist_metadata(conversation)?;
+            }
             conversation.id
         };
 
@@ -211,10 +220,55 @@ impl AppState {
                 .iter_mut()
                 .find(|conversation| conversation.id == conversation_id)
             {
-                conversation.add_message(assistant_message.clone());
+                let title_changed = conversation.add_message(assistant_message.clone());
                 self.store
                     .append_message(conversation.id, &assistant_message)?;
+                if title_changed {
+                    self.store.persist_metadata(conversation)?;
+                }
             }
+        }
+        Ok(())
+    }
+
+    pub fn rename_conversation(&self, id: Uuid, title: impl Into<String>) -> Result<()> {
+        let mut inner = self.inner.write();
+        if let Some(conversation) = inner.conversations.iter_mut().find(|c| c.id == id) {
+            conversation.title = title.into();
+            self.store.persist_metadata(conversation)?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_conversation(&self, id: Uuid) -> Result<bool> {
+        let mut inner = self.inner.write();
+        if let Some(position) = inner.conversations.iter().position(|c| c.id == id) {
+            inner.conversations.remove(position);
+            if inner.current_session == Some(id) {
+                inner.current_session = inner.conversations.first().map(|c| c.id);
+            }
+            self.store.delete_conversation(id)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn reorder_conversations(&self, dragged: Uuid, target: Uuid) -> Result<()> {
+        let mut inner = self.inner.write();
+        let from_idx = inner.conversations.iter().position(|c| c.id == dragged);
+        let to_idx = inner.conversations.iter().position(|c| c.id == target);
+        match (from_idx, to_idx) {
+            (Some(from), Some(mut to)) => {
+                if from == to {
+                    return Ok(());
+                }
+                let conversation = inner.conversations.remove(from);
+                if from < to {
+                    to -= 1;
+                }
+                inner.conversations.insert(to, conversation);
+            }
+            _ => {}
         }
         Ok(())
     }
