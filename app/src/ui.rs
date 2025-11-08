@@ -129,6 +129,8 @@ pub struct MenuBarOutput {
     pub toggle_sidebar: bool,
     pub focus_search: bool,
     pub clear_input: bool,
+    pub exit: bool,
+    pub show_about: bool,
     pub theme_changed: Option<ThemeMode>,
 }
 
@@ -144,6 +146,10 @@ impl MenuBar {
                 ui.menu_button("File", |ui| {
                     if ui.button("New chat\tCtrl+N").clicked() {
                         output.new_chat = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Exit").clicked() {
+                        output.exit = true;
                         ui.close_menu();
                     }
                 });
@@ -164,7 +170,10 @@ impl MenuBar {
                     }
                 });
                 ui.menu_button("Help", |ui| {
-                    ui.label("Patina Desktop Client");
+                    if ui.button("About").clicked() {
+                        output.show_about = true;
+                        ui.close_menu();
+                    }
                 });
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     egui::ComboBox::from_id_source("theme_selector")

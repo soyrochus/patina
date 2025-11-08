@@ -1,3 +1,8 @@
+const ABOUT_LOGO_BYTES: &[u8] = include_bytes!("../../images/patina-logo-min-transparent.png");
+const ABOUT_WINDOW_WIDTH: f32 = 640.0;
+const ABOUT_WINDOW_HEIGHT: f32 = 360.0;
+const ABOUT_LOGO_MAX_WIDTH: f32 = 240.0;
+
 use crate::ui::{
     ChatPanel, ChatPanelState, InputBar, InputBarOutput, InputBarState, McpSidebarEntry, McpStatus,
     MenuBar, MenuBarOutput, MenuBarState, Sidebar, SidebarOutput, SidebarState, ThemeMode,
@@ -23,7 +28,6 @@ use uuid::Uuid;
 const SETTINGS_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 const SPLASH_DURATION: Duration = Duration::from_secs(1);
 const MANUAL_DISMISS_DELAY: Duration = Duration::from_millis(150);
-const ABOUT_LOGO_BYTES: &[u8] = include_bytes!("../../images/patina-logo-min-transparent.png");
 
 #[derive(Clone, Copy)]
 enum AboutMode {
@@ -50,6 +54,7 @@ pub struct PatinaEguiApp {
     last_settings_flush: Instant,
     logo_texture: Option<egui::TextureHandle>,
     about_mode: Option<AboutMode>,
+    pending_exit: bool,
 }
 
 impl PatinaEguiApp {
@@ -89,6 +94,7 @@ impl PatinaEguiApp {
             about_mode: Some(AboutMode::Splash {
                 opened: Instant::now(),
             }),
+            pending_exit: false,
         };
         app.refresh_pinned_cache();
         app
@@ -284,6 +290,14 @@ impl PatinaEguiApp {
         if output.clear_input {
             self.input_state.draft.clear();
         }
+        if output.show_about {
+            self.about_mode = Some(AboutMode::Manual {
+                opened: Instant::now(),
+            });
+        }
+        if output.exit {
+            self.pending_exit = true;
+        }
         if let Some(mode) = output.theme_changed {
             self.menu_state.theme_mode = mode;
             self.settings.data_mut().theme_mode = mode;
@@ -437,6 +451,10 @@ impl PatinaEguiApp {
         self.draw_about_dialog(ctx);
         self.capture_window_size(ctx);
         self.flush_settings_if_needed();
+        if self.pending_exit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            self.pending_exit = false;
+        }
     }
 
     fn draw_about_dialog(&mut self, ctx: &egui::Context) {
@@ -467,32 +485,35 @@ impl PatinaEguiApp {
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .default_width(ABOUT_WINDOW_WIDTH)
+            .default_height(ABOUT_WINDOW_HEIGHT)
             .frame(frame)
             .open(&mut open)
             .show(ctx, |ui| {
+                ui.set_min_size(egui::vec2(ABOUT_WINDOW_WIDTH, ABOUT_WINDOW_HEIGHT));
                 ui.horizontal(|ui| {
                     if let Some(texture) = &self.logo_texture {
                         let mut size = texture.size_vec2();
-                        if size.x > 120.0 {
-                            size *= 120.0 / size.x;
+                        if size.x > ABOUT_LOGO_MAX_WIDTH {
+                            size *= ABOUT_LOGO_MAX_WIDTH / size.x;
                         }
                         ui.add(egui::widgets::Image::new((texture.id(), size)));
                     } else {
-                        ui.allocate_space(egui::vec2(120.0, 120.0));
+                        ui.allocate_space(egui::vec2(ABOUT_LOGO_MAX_WIDTH, ABOUT_LOGO_MAX_WIDTH));
                     }
-                    ui.add_space(16.0);
+                    ui.add_space(24.0);
                     ui.vertical(|ui| {
                         ui.heading("Patina Desktop");
                         ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
                         ui.label(
                             "Patina is a native desktop chat client with OpenAI, Azure OpenAI, and MCP integrations.",
                         );
-                        ui.add_space(8.0);
-                        ui.label("License: MIT OR Apache-2.0");
+                        ui.add_space(12.0);
+                        ui.label("License: MIT");
                         ui.label("© 2025 Iwan van der Kleijn");
                         if is_manual {
-                            ui.add_space(12.0);
+                            ui.add_space(16.0);
                             ui.label(
                                 RichText::new("Press any key or click to dismiss")
                                     .italics()
