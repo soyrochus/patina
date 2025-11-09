@@ -2,7 +2,9 @@
 
 ![Patina logo](images/patina-logo-min-transparent.png)
 
-Patina is a native desktop chat client written in Rust with an `egui` interface and a modular core that supports large language model (LLM) providers and Model Context Protocol (MCP) integrations. The workspace is split into multiple crates to encourage reuse, automated testing, and streamlined tooling.
+Patina is a native desktop chat client built in Rust with an egui interface, designed to connect seamlessly with large language models (LLMs) through both cloud and local providers. The current implementation enables direct interaction with OpenAI models, providing a clean, responsive, and fully functional chat experience. While many advanced capabilities — such as local LLM integration and extended provider support — are still in active development, the application is evolving quickly toward a full-featured, independent alternative to proprietary AI clients.
+
+Beyond serving as a chat interface, Patina is also conceived as an experimental platform for rapid AI integration and prototyping. Its modular design and support for the Model Context Protocol (MCP) allow developers to attach new agent models or services without altering the core code. This makes it ideal for fast iteration and experimentation, whether testing local LLMs, exploring new AI workflows, or building decoupled agent systems. As the project expands, Patina aims to remain both a practical everyday tool and a flexible testbed for AI-driven desktop innovation.
 
 **Patina Desktop in Light Mode**
 ![Patina in Light mode](images/patina-min-light.png)
