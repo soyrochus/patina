@@ -1,6 +1,5 @@
 use crate::state::{ChatMessage, Conversation};
 use anyhow::Result;
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -10,19 +9,6 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct TranscriptStore {
     root: PathBuf,
-}
-
-impl Default for TranscriptStore {
-    fn default() -> Self {
-        let root = ProjectDirs::from("com", "Patina", "Patina")
-            .map(|dirs| dirs.data_local_dir().to_path_buf())
-            .unwrap_or_else(|| {
-                let mut fallback = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                fallback.push("patina-data");
-                fallback
-            });
-        Self::new(root)
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,9 +53,14 @@ impl TranscriptStore {
         if !path.exists() {
             return Ok(conversations);
         }
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let file_path = entry.path();
+        for entry in walkdir::WalkDir::new(path)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let file_path = entry.into_path();
             if file_path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                 continue;
             }
@@ -103,6 +94,9 @@ impl TranscriptStore {
         let path = self
             .conversation_dir()
             .join(format!("{}.jsonl", conversation_id));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
         let serialized = serde_json::to_vec(message)?;
         file.write_all(&serialized)?;

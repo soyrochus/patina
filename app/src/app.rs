@@ -10,14 +10,17 @@ use crate::{
         ThemeMode, ThemePalette,
     },
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use egui::{self, Margin, RichText, Stroke, TextureOptions};
 use egui_commonmark::CommonMarkCache;
+use patina_core::project::ProjectHandle;
 use patina_core::state::AppState;
-use patina_core::LlmStatus;
+use patina_core::{llm::LlmDriver, LlmStatus};
+use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,7 +41,8 @@ enum AboutMode {
 }
 
 pub struct PatinaEguiApp {
-    state: Arc<AppState>,
+    state: Option<Arc<AppState>>,
+    driver: LlmDriver,
     runtime: Arc<Runtime>,
     tx: UnboundedSender<Result<()>>,
     rx: UnboundedReceiver<Result<()>>,
@@ -57,16 +61,20 @@ pub struct PatinaEguiApp {
     logo_texture: Option<egui::TextureHandle>,
     about_mode: Option<AboutMode>,
     pending_exit: bool,
+    pending_title: Option<String>,
 }
 
 impl PatinaEguiApp {
-    pub fn new(state: Arc<AppState>, runtime: Arc<Runtime>, settings: UiSettingsStore) -> Self {
+    pub fn new(
+        project: Option<ProjectHandle>,
+        driver: LlmDriver,
+        runtime: Arc<Runtime>,
+        settings: UiSettingsStore,
+    ) -> Self {
         let (tx, rx) = unbounded_channel();
-        if let Some(last) = settings.data().last_conversation {
-            state.select_conversation(last);
-        }
         let mut app = Self {
-            state,
+            state: None,
+            driver,
             runtime,
             tx,
             rx,
@@ -97,8 +105,19 @@ impl PatinaEguiApp {
                 opened: Instant::now(),
             }),
             pending_exit: false,
+            pending_title: None,
         };
         app.refresh_pinned_cache();
+        if let Some(project) = project {
+            app.activate_project(project);
+        } else {
+            {
+                let data = app.settings.data_mut();
+                data.current_project = None;
+                data.last_conversation = None;
+            }
+            app.pending_title = Some("Patina".to_string());
+        }
         app
     }
 
@@ -161,7 +180,8 @@ impl PatinaEguiApp {
     }
 
     fn layout(&mut self, ctx: &egui::Context) {
-        let llm_status = self.state.llm_status();
+        let project_loaded = self.state.is_some();
+        let llm_status = self.driver.status();
         egui::TopBottomPanel::top("menu_bar")
             .frame(
                 egui::Frame::none()
@@ -169,7 +189,12 @@ impl PatinaEguiApp {
                     .inner_margin(Margin::symmetric(12.0, 8.0)),
             )
             .show(ctx, |ui| {
-                let output = MenuBar::show(ui, &mut self.menu_state, self.logo_texture.as_ref());
+                let output = MenuBar::show(
+                    ui,
+                    &mut self.menu_state,
+                    self.logo_texture.as_ref(),
+                    project_loaded,
+                );
                 self.handle_menu_output(output);
                 if let Some(err) = &self.error {
                     ui.colored_label(self.palette.warning, err);
@@ -187,108 +212,128 @@ impl PatinaEguiApp {
                 }
             });
 
-        let active_conversation = self.state.active_conversation();
+        if let Some(state) = self.state.as_ref() {
+            let active_conversation = state.active_conversation();
 
-        if self.sidebar_state.collapsed {
-            egui::SidePanel::left("sidebar_collapsed")
-                .resizable(false)
-                .exact_width(36.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(self.palette.sidebar_background)
-                        .inner_margin(Margin::same(6.0)),
-                )
-                .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        if ui.button("⟩").clicked() {
-                            self.sidebar_state.collapsed = false;
-                            self.set_sidebar_visibility(true);
-                        }
+            if self.sidebar_state.collapsed {
+                egui::SidePanel::left("sidebar_collapsed")
+                    .resizable(false)
+                    .exact_width(36.0)
+                    .frame(
+                        egui::Frame::none()
+                            .fill(self.palette.sidebar_background)
+                            .inner_margin(Margin::same(6.0)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            if ui.button("⟩").clicked() {
+                                self.sidebar_state.collapsed = false;
+                                self.set_sidebar_visibility(true);
+                            }
+                        });
                     });
-                });
-        } else {
-            let summaries = self.state.conversation_summaries();
-            let pinned_order = self.settings.data().pinned_chats.clone();
+            } else {
+                let summaries = state.conversation_summaries();
+                let pinned_order = self.settings.data().pinned_chats.clone();
 
-            let response = egui::SidePanel::left("sidebar")
-                .resizable(true)
-                .min_width(220.0)
-                .default_width(self.settings.data().sidebar_width)
+                let response = egui::SidePanel::left("sidebar")
+                    .resizable(true)
+                    .min_width(220.0)
+                    .default_width(self.settings.data().sidebar_width)
+                    .frame(
+                        egui::Frame::none()
+                            .fill(self.palette.sidebar_background)
+                            .inner_margin(Margin::same(12.0)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("⟨").clicked() {
+                                self.sidebar_state.collapsed = true;
+                                self.set_sidebar_visibility(false);
+                            }
+                            ui.label(RichText::new("Workspace").strong());
+                        });
+                        ui.add_space(8.0);
+                        let active_id = active_conversation
+                            .as_ref()
+                            .map(|conversation| conversation.id);
+                        let sidebar_output = Sidebar::show(
+                            ui,
+                            &mut self.sidebar_state,
+                            &self.palette,
+                            &summaries,
+                            &self.pinned_lookup,
+                            &pinned_order,
+                            &mut self.mcp_entries,
+                            active_id,
+                        );
+                        self.handle_sidebar_output(sidebar_output);
+                    });
+
+                let width = response.response.rect.width();
+                if (self.settings.data().sidebar_width - width).abs() > 1.0 {
+                    self.settings.data_mut().sidebar_width = width;
+                }
+            }
+
+            egui::TopBottomPanel::bottom("chat_input")
                 .frame(
                     egui::Frame::none()
-                        .fill(self.palette.sidebar_background)
+                        .fill(self.palette.surface)
                         .inner_margin(Margin::same(12.0)),
                 )
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("⟨").clicked() {
-                            self.sidebar_state.collapsed = true;
-                            self.set_sidebar_visibility(false);
-                        }
-                        ui.label(RichText::new("Workspace").strong());
-                    });
-                    ui.add_space(8.0);
-                    let active_id = active_conversation
-                        .as_ref()
-                        .map(|conversation| conversation.id);
-                    let sidebar_output = Sidebar::show(
-                        ui,
-                        &mut self.sidebar_state,
-                        &self.palette,
-                        &summaries,
-                        &self.pinned_lookup,
-                        &pinned_order,
-                        &mut self.mcp_entries,
-                        active_id,
-                    );
-                    self.handle_sidebar_output(sidebar_output);
+                    let input_output = InputBar::show(ui, &mut self.input_state, &self.palette);
+                    self.handle_input_output(input_output);
                 });
 
-            let width = response.response.rect.width();
-            if (self.settings.data().sidebar_width - width).abs() > 1.0 {
-                self.settings.data_mut().sidebar_width = width;
-            }
-        }
-
-        egui::TopBottomPanel::bottom("chat_input")
-            .frame(
-                egui::Frame::none()
-                    .fill(self.palette.surface)
-                    .inner_margin(Margin::same(12.0)),
-            )
-            .show(ctx, |ui| {
-                let input_output = InputBar::show(ui, &mut self.input_state, &self.palette);
-                self.handle_input_output(input_output);
-            });
-
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::none()
-                    .fill(self.palette.background)
-                    .inner_margin(Margin::same(16.0)),
-            )
-            .show(ctx, |ui| {
-                if let Some(conversation) = active_conversation.as_ref() {
-                    let chat_output = ChatPanel::show(
-                        ui,
-                        &self.palette,
-                        &mut self.chat_panel_state,
-                        conversation,
-                        &mut self.markdown_cache,
-                    );
-                    if chat_output.load_older {
-                        self.chat_panel_state
-                            .request_more(conversation.messages.len());
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::none()
+                        .fill(self.palette.background)
+                        .inner_margin(Margin::same(16.0)),
+                )
+                .show(ctx, |ui| {
+                    if let Some(conversation) = active_conversation.as_ref() {
+                        let chat_output = ChatPanel::show(
+                            ui,
+                            &self.palette,
+                            &mut self.chat_panel_state,
+                            conversation,
+                            &mut self.markdown_cache,
+                        );
+                        if chat_output.load_older {
+                            self.chat_panel_state
+                                .request_more(conversation.messages.len());
+                        }
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.label("Start a conversation to see the transcript here.");
+                        });
                     }
-                } else {
+                });
+        } else {
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::none()
+                        .fill(self.palette.background)
+                        .inner_margin(Margin::same(32.0)),
+                )
+                .show(ctx, |ui| {
                     ui.centered_and_justified(|ui| {
-                        ui.label("Start a conversation to see the transcript here.");
+                        ui.label("Create or open a project from the File menu to get started.");
                     });
-                }
-            });
+                });
+        }
     }
 
     fn handle_menu_output(&mut self, output: MenuBarOutput) {
+        if output.new_project {
+            self.prompt_new_project();
+        }
+        if output.open_project {
+            self.prompt_open_project();
+        }
         if output.new_chat {
             self.create_new_chat();
         }
@@ -316,22 +361,25 @@ impl PatinaEguiApp {
     }
 
     fn handle_sidebar_output(&mut self, output: SidebarOutput) {
+        let Some(state) = self.state.as_ref().cloned() else {
+            return;
+        };
         if let Some(id) = output.selected_chat {
-            self.state.select_conversation(id);
+            state.select_conversation(id);
             self.update_last_conversation(id);
         }
         if let Some((id, name)) = output.rename {
-            if let Err(err) = self.state.rename_conversation(id, name.clone()) {
+            if let Err(err) = state.rename_conversation(id, name.clone()) {
                 self.error = Some(err.to_string());
             } else {
                 self.error = None;
             }
         }
         if let Some(id) = output.delete {
-            match self.state.delete_conversation(id) {
+            match state.delete_conversation(id) {
                 Ok(true) => {
                     self.unpin_chat(id);
-                    if let Some(active) = self.state.active_conversation() {
+                    if let Some(active) = state.active_conversation() {
                         self.update_last_conversation(active.id);
                     } else {
                         self.settings.data_mut().last_conversation = None;
@@ -342,7 +390,7 @@ impl PatinaEguiApp {
             }
         }
         if let Some((dragged, target)) = output.reorder {
-            if let Err(err) = self.state.reorder_conversations(dragged, target) {
+            if let Err(err) = state.reorder_conversations(dragged, target) {
                 self.error = Some(err.to_string());
             }
         }
@@ -380,8 +428,10 @@ impl PatinaEguiApp {
         if content.is_empty() {
             return;
         }
+        let Some(state) = self.state.as_ref().cloned() else {
+            return;
+        };
         let payload = content.to_owned();
-        let state = self.state.clone();
         let tx = self.tx.clone();
         self.runtime.spawn(async move {
             let result = state.send_user_message(payload).await;
@@ -392,8 +442,10 @@ impl PatinaEguiApp {
     }
 
     fn create_new_chat(&mut self) {
-        let id = self.state.start_new_conversation();
-        self.update_last_conversation(id);
+        if let Some(state) = self.state.as_ref() {
+            let id = state.start_new_conversation();
+            self.update_last_conversation(id);
+        }
     }
 
     fn toggle_sidebar(&mut self) {
@@ -431,6 +483,97 @@ impl PatinaEguiApp {
         self.pinned_lookup = self.settings.data().pinned_chats.iter().copied().collect();
     }
 
+    fn activate_project(&mut self, project: ProjectHandle) {
+        let last_selected = self.settings.data().last_conversation;
+        let state = Arc::new(AppState::new(project.clone(), self.driver.clone()));
+        if let Some(last) = last_selected {
+            state.select_conversation(last);
+        }
+        self.state = Some(state);
+        self.error = None;
+        self.remember_project(&project);
+        self.refresh_pinned_cache();
+        self.pending_title = Some(format!("Patina — {}", project.name()));
+        self.sync_last_conversation();
+    }
+
+    fn remember_project(&mut self, project: &ProjectHandle) {
+        let root = project.paths().root.to_string_lossy().to_string();
+        let data = self.settings.data_mut();
+        data.current_project = Some(root.clone());
+        data.recent_projects.retain(|entry| entry != &root);
+        data.recent_projects.insert(0, root);
+        if data.recent_projects.len() > 10 {
+            data.recent_projects.truncate(10);
+        }
+    }
+
+    fn sync_last_conversation(&mut self) {
+        let active = self
+            .state
+            .as_ref()
+            .and_then(|state| state.active_conversation().map(|c| c.id));
+        self.settings.data_mut().last_conversation = active;
+    }
+
+    fn prompt_new_project(&mut self) {
+        let default_dir = Self::default_project_directory();
+        let mut dialog = FileDialog::new();
+        dialog = dialog
+            .set_title("Create Patina Project")
+            .add_filter("Patina Project", &["pat"])
+            .set_file_name("NewProject.pat");
+        if default_dir.exists() {
+            dialog = dialog.set_directory(default_dir);
+        }
+        if let Some(path) = dialog.save_file() {
+            match self.create_project_from_path(&path) {
+                Ok(project) => self.activate_project(project),
+                Err(err) => self.error = Some(err.to_string()),
+            }
+        }
+    }
+
+    fn prompt_open_project(&mut self) {
+        let default_dir = Self::default_project_directory();
+        let mut dialog = FileDialog::new();
+        dialog = dialog
+            .set_title("Open Patina Project")
+            .add_filter("Patina Project", &["pat"]);
+        if default_dir.exists() {
+            dialog = dialog.set_directory(default_dir);
+        }
+        if let Some(path) = dialog.pick_file() {
+            match ProjectHandle::open(&path) {
+                Ok(project) => self.activate_project(project),
+                Err(err) => self.error = Some(err.to_string()),
+            }
+        }
+    }
+
+    fn create_project_from_path(&self, path: &Path) -> Result<ProjectHandle> {
+        let name = if path.extension().and_then(|ext| ext.to_str()) == Some("pat") {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| anyhow!("project file must have a valid name"))?
+                .to_string()
+        } else {
+            path.file_name()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| anyhow!("project path must have a valid name"))?
+                .to_string()
+        };
+        ProjectHandle::create(path, &name)
+    }
+
+    fn default_project_directory() -> PathBuf {
+        if let Some(dirs) = ProjectDirs::from("com", "Patina", "Patina") {
+            dirs.data_local_dir().join("projects")
+        } else {
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        }
+    }
+
     fn capture_window_size(&mut self, ctx: &egui::Context) {
         if let Some(rect) = ctx.input(|input| input.viewport().inner_rect) {
             let size = rect.size();
@@ -463,6 +606,9 @@ impl PatinaEguiApp {
         self.draw_about_dialog(ctx);
         self.capture_window_size(ctx);
         self.flush_settings_if_needed();
+        if let Some(title) = self.pending_title.take() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
         if self.pending_exit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             self.pending_exit = false;
@@ -596,6 +742,10 @@ pub struct UiSettings {
     pub temperature: f32,
     #[serde(default = "UiSettings::default_retain_input")]
     pub retain_input: bool,
+    #[serde(default)]
+    pub recent_projects: Vec<String>,
+    #[serde(default)]
+    pub current_project: Option<String>,
 }
 
 impl Default for UiSettings {
@@ -610,6 +760,8 @@ impl Default for UiSettings {
             model: Self::default_model(),
             temperature: Self::default_temperature(),
             retain_input: true,
+            recent_projects: Vec::new(),
+            current_project: None,
         }
     }
 }

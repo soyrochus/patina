@@ -1,4 +1,5 @@
 use crate::llm::{LlmDriver, LlmStatus};
+use crate::project::ProjectHandle;
 use crate::store::TranscriptStore;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -130,6 +131,7 @@ pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
     store: TranscriptStore,
     llm: LlmDriver,
+    project: ProjectHandle,
 }
 
 #[derive(Default)]
@@ -139,7 +141,12 @@ struct InnerState {
 }
 
 impl AppState {
-    pub fn new(store: TranscriptStore, llm: LlmDriver) -> Self {
+    pub fn new(project: ProjectHandle, llm: LlmDriver) -> Self {
+        let store = project.transcript_store();
+        Self::with_store(project, store, llm)
+    }
+
+    pub fn with_store(project: ProjectHandle, store: TranscriptStore, llm: LlmDriver) -> Self {
         let conversations = store.load_conversations().unwrap_or_default();
         let current_session = conversations.first().map(|c| c.id);
         Self {
@@ -149,7 +156,12 @@ impl AppState {
             })),
             store,
             llm,
+            project,
         }
+    }
+
+    pub fn project(&self) -> &ProjectHandle {
+        &self.project
     }
 
     pub fn conversation_summaries(&self) -> Vec<ConversationSummary> {
