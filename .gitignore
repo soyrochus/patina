@@ -5,3 +5,7 @@
 # Env variables 
 .env
 
+#l Local test / mock data
+
+projects/
+

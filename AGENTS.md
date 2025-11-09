@@ -1,153 +1,94 @@
-# agent.md — Patina Projects (minimal refactor)
+**Prompt for a coding assistant (implement Settings screen for “Patina”, no code included)**
 
-## Role
+Implement a Settings modal like in the screenshot: a clean two-card layout with a clear separation between “App settings” (global) and “Project settings (current project)”. Each card has its own collapsible provider details panel, inline validation, and Save/Cancel controls. The modal scrolls if needed.
 
-You are a senior Rust engineer. Implement a **minimal refactor** so Patina can work with **multiple projects** on disk. Do **not** add new subsystems (no SQLite, no secrets store, no blobs/cache managers). Keep the current conversation storage format and logic—just relocate it into each project’s directory and add import/export.
+See image at: ![Project Design Mockup](design/settings_dialog_light_mode/screen.png)
 
-## Goals
+SCOPE
 
-* Patina operates on a **Project** selected by the user.
-* A Project is a **directory** anywhere on disk, with:
+1. Build the UI exactly as shown: labels on the left, inputs on the right, subtle section headers, collapsible provider block with a “Collapse / Expand” affordance.
+2. Persist data to YAML files at the default config locations described below, with safe read/write and simple migration if keys are missing.
+3. No source code examples in your output. Only implement.
 
-  * A **root index file** named exactly like the directory, with `.pat` extension.
-  * A hidden **`.patina/` directory** containing the **conversations** subfolder that holds the existing JSONL history (moved from the old home/Library location).
-* Patina can **Create**, **Open**, **Export** (zip), and **Import** (unzip) projects.
-* Patina remains **decoupled from any IDE workspace** (e.g., VS Code).
+UI REQUIREMENTS
 
-## Non-Goals (for this refactor)
+A) App settings (global)
+• Theme: dropdown with three options — System, Light, Dark.
+• LLM provider: dropdown with two options for now — Azure OpenAI, OpenAI.
+• Provider details panel: collapsible.
+– Azure OpenAI fields:
+• API_KEY: secret input, masked by default; include an eye icon to toggle visibility.
+• ENDPOINT: single line text.
+• API_VERSION: single line text with placeholder similar to “2024-12-01-preview”.
+• DEPLOYMENT_NAME: single line text.
+• Available model names: multi-line textarea where the user enters a comma or semicolon separated list. Under the textarea, show the parsed items as selectable chips/tags that will become the choices for model selection elsewhere.
+– OpenAI fields:
+• API_KEY: secret input with visibility toggle.
+• Available model names: same behavior as above.
+• Save and Cancel buttons for the App section. Disable Save if validation fails.
 
-* No SQLite or new indices.
-* No secrets management, blobs, or cache subsystems.
-* No new message formats—reuse existing JSON/JSONL as-is.
+B) Project settings (current project)
+• Checkbox “Inherit system setting”. When checked, disable all project-level inputs and show a subtle info label “Using App settings”.
+• When unchecked, show the same LLM provider dropdown and the corresponding collapsible details panel as in App settings, but only for the chosen provider.
+• The Available model names behavior is identical.
+• Save and Cancel buttons for the Project section. Saving here writes only the project-level data.
 
-## On-disk layout (minimal)
+VALIDATION
 
-For a project named `Atlas`:
+• API_KEY can be empty in storage, but warn in the UI if the selected provider has no key.
+• For Azure OpenAI: ENDPOINT must be a valid URL and API_VERSION must be nonempty to enable Save.
+• DEPLOYMENT_NAME is optional but, if present, cannot be only whitespace.
+• Available model names: parse by splitting on comma or semicolon, trim whitespace, drop empty entries, deduplicate while preserving order. Display what will be saved.
+• If validation fails, show inline error messages next to the fields and keep Save disabled.
 
-```
-Atlas/
-├─ Atlas.pat                 # root index file, same basename as directory
-├─ (optional user files and folders)
-└─ .patina/
-   └─ conversations/         # existing conversation history moved here (JSON/JSONL)
-      ├─ 2025/
-      │  └─ <uuid>.jsonl
-      └─ (whatever the current implementation already writes)
-```
+PERSISTENCE AND FILE LOCATIONS
 
-### `Atlas.pat` (TOML)
+Global configuration (applies to all OS, using each OS’s default config root):
+• Use the platform’s default user config directory. On Linux, the file lives at:
+$HOME/config/patina/patina.yml
+• Use equivalent defaults on macOS and Windows based on system conventions for per-user config directories.
+• Create intermediate directories if missing.
+• The global file contains only App settings.
 
-Small, human-readable. Only what we need now.
+Project configuration:
+• Store project-level settings inside the project’s own path metadata file, located at:
+<<project_dir>>/<<project_file>>.path
+• Add a dedicated settings section in that .path file to hold the Project settings.
+• If “Inherit system setting” is true, do not duplicate provider data in the project file. At runtime, read from the global configuration.
 
-```toml
-version = 1
-name = "Atlas"
-created_utc = "2025-11-09T00:00:00Z"
+LOAD AND MERGE RULES
 
-[paths]
-internal = ".patina"
-conversations = ".patina/conversations"
-```
+• On startup or when opening Settings:
 
-## Behavioral requirements
+1. Read global configuration from the user config directory.
+2. Read project configuration from <<project_dir>>/<<project_file>>.path.
+3. If the project is set to inherit, the UI shows global values in disabled state for project fields.
+   • On Save in App settings: write only the global file. Preserve unrelated keys if present.
+   • On Save in Project settings: write only to the project .path file. Preserve unrelated keys in that file.
+   • Include a minimal migration that fills defaults for missing keys and rewrites on Save.
 
-### Create Project
 
-* User chooses a new directory or name; app scaffolds:
+DEFAULT MODEL NAMES:
+For both OpenAI as well as Azure OpenAI, use these three model names as default
 
-  * `<Name>/`
-  * `<Name>/<Name>.pat` (populate with minimal TOML above)
-  * `<Name>/.patina/conversations/` (empty)
-* Set this project as current.
+gpt-5 
+gpt-5-mini
+gpt-5 nano
 
-### Open Project
 
-* Accept either the project directory or the `.pat` file path.
-* Validate the presence of `<Dir>/<DirName>.pat` and `.patina/conversations/`.
-* Load the current conversation list from `.patina/conversations/` using the **existing** loaders.
 
-### Refactor storage location
+UX DETAILS
 
-* **All writes/reads of conversation history must move from the old app-data/home/Library path to `project/.patina/conversations/`.**
-* The conversation line format, file naming, and rotation stay exactly as today.
+• Respect the screenshot’s visual hierarchy: two main cards, each with its own collapsible provider block.
+• Provide a small helper text under “Available model names” saying “Comma or semicolon separated”.
+• After successful Save, show a non-intrusive confirmation.
+• Cancel discards local changes.
+• The modal should be accessible with keyboard navigation and clear focus states.
 
-### One-time migration (optional UX)
+ACCEPTANCE CHECKS
 
-* When opening a project for the first time on this machine, **offer** to import the legacy global history:
-
-  * Copy existing conversation files from the old location into `project/.patina/conversations/` preserving structure and timestamps.
-  * Do not delete the legacy copy automatically; offer a “Delete legacy store” button after successful copy.
-
-### Export (zip)
-
-* `Export Project` produces a `.zip` of the entire project directory (including `.patina/conversations/` and the `.pat` file).
-* No special redactions in this minimal refactor—just a faithful zip of the tree.
-
-### Import (zip)
-
-* `Import Project` lets the user pick a zip and a destination directory. Unzip into the chosen folder.
-* Validate after unzip and then open the imported project.
-
-### Decoupling from IDEs
-
-* A Patina Project is **not tied** to VS Code or any source workspace. Opening a Patina Project must not read or write to `.vscode/` or any repo metadata.
-
-## UI requirements (light)
-
-* Welcome screen: **New Project**, **Open Project**, **Open Recent**.
-* Window title: `Patina — <ProjectName>`.
-* Side panel shows conversations from the current project (exactly as today, just reading the new path).
-* Export/Import actions in a Project menu.
-
-## CLI (optional but simple)
-
-* `patina --project <path>` where `<path>` is a directory or `.pat` file.
-* `patina --new <dir> --name <Name>` creates a project skeleton.
-* `patina export --project <dir> --out <zip>`
-* `patina import --zip <zip> --into <dir>`
-
-## Implementation tasks
-
-1. **Paths and model**
-
-   * Introduce `ProjectPaths { root, pat_file, internal, conversations }`.
-   * Resolve paths from the `.pat` file’s location.
-
-2. **Create/Open**
-
-   * `ProjectHandle::create(at: &Path, name: &str) -> Result<ProjectHandle>`.
-   * `ProjectHandle::open(from: &Path) -> Result<ProjectHandle>` supports either dir or `.pat` file.
-
-3. **Conversation IO refactor**
-
-   * Replace all references to the legacy home/Library storage with `ProjectPaths.conversations`.
-   * Keep serializers, file rotation, and JSONL format unchanged.
-
-4. **Import/Export**
-
-   * `ProjectHandle::export_zip<W: Write>(&self, to: W) -> Result<()>` — stream zip of the project directory.
-   * `ProjectHandle::import_zip<R: Read>(zip: R, into_dir: &Path) -> Result<ProjectHandle>` — unzip → validate → open.
-
-5. **Legacy migration (optional UX)**
-
-   * Add a dialog on first open: “Import previous Patina history into this project?” If yes, copy files as-is into `.patina/conversations/`.
-
-6. **Recent projects**
-
-   * Maintain a user-level recent list of project paths (does not affect the project structure).
-
-## Acceptance criteria
-
-* Creating a project generates `<Name>/<Name>.pat` and `.patina/conversations/`.
-* Starting a new conversation writes only under `.patina/conversations/`.
-* Opening an existing project shows the same conversation list and content as before the refactor (after optional migration).
-* Export produces a single zip that, when imported elsewhere, opens and works with all conversations intact.
-* No reads/writes occur in the legacy home/Library store once a project is open.
-* Patina functions normally when VS Code is closed or open on an unrelated repo; no `.vscode/` or repo writes.
-
-## Notes for the codegen agent
-
-* Use existing conversation IO code paths; only change the **root** directory they point to.
-* Keep all formats stable; do not add DBs, caches, or new files.
-* Be careful with path handling across platforms (Windows/macOS/Linux).
-* Ensure zip operations stream to avoid large memory spikes.
+• Changing the global theme and provider, saving, then reopening reflects the values from the global file.
+• In a project with “Inherit system setting” checked, opening the settings shows project fields disabled and adopting the global values.
+• Unchecking inherit, entering OpenAI API key and models at project level, saving, closing, and reopening shows the project overrides and leaves the global file unchanged.
+• Entering “gpt-4o; gpt-4-turbo, gpt-4o” in Available model names results in two chips: gpt-4o and gpt-4-turbo, in that order.
+• For Azure OpenAI, an invalid endpoint or empty API version keeps Save disabled and shows inline errors.

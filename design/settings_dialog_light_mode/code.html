@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Patina Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+<script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-[#0d141b] dark:text-slate-200">
+<div class="relative flex min-h-screen w-full flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
+<div class="w-full max-w-3xl rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-200/50 dark:shadow-black/20">
+<header class="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 p-4 sm:p-6">
+<p class="text-2xl font-black tracking-[-0.033em] text-[#0d141b] dark:text-white">Settings</p>
+<button class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700">
+<span class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-400">close</span>
+</button>
+</header>
+<main class="flex flex-col gap-8 p-4 sm:p-6">
+<section class="flex flex-col gap-4">
+<h3 class="text-[#0d141b] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] px-0 pb-2">App settings</h3>
+<div class="grid grid-cols-1 gap-4">
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">Theme</p>
+<select class="form-select h-11 w-full max-w-xs flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0">
+<option>System</option>
+<option>Dark</option>
+<option selected="">Light</option>
+</select>
+</label>
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">LLM provider</p>
+<select class="form-select h-11 w-full max-w-xs flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0">
+<option>OpenAI</option>
+<option selected="">Azure OpenAI</option>
+</select>
+</label>
+</div>
+<div class="flex flex-col gap-4 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+<div class="flex items-center justify-end">
+<button class="flex items-center gap-2 text-sm font-semibold text-primary">
+<span class="material-symbols-outlined text-xl">expand_less</span>
+                                Collapse
+                            </button>
+</div>
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">API_KEY</p>
+<div class="relative flex w-full flex-1 items-stretch">
+<input class="form-input h-11 w-full flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 pr-10 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" type="password" value="••••••••••••••••••••••••••••••"/>
+<button class="absolute inset-y-0 right-0 flex items-center pr-3 text-[#4c739a] dark:text-slate-400">
+<span class="material-symbols-outlined text-xl">visibility</span>
+</button>
+</div>
+</label>
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">ENDPOINT</p>
+<input class="form-input h-11 w-full flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" placeholder="https://[...].azure.com/" type="text"/>
+</label>
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">API_VERSION</p>
+<input class="form-input h-11 w-full flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" placeholder="2024-12-01-preview" type="text"/>
+</label>
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">DEPLOYMENT_NAME</p>
+<input class="form-input h-11 w-full flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" placeholder="gpt-4o" type="text"/>
+</label>
+<label class="flex flex-col sm:col-span-2">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">Available model names</p>
+<textarea class="form-textarea w-full flex-1 resize-y overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" placeholder="gpt-4o, gpt-4-turbo" rows="3"></textarea>
+</label>
+</div>
+</div>
+</section>
+<hr class="border-slate-200 dark:border-slate-800"/>
+<section class="flex flex-col gap-4">
+<h3 class="text-[#0d141b] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] px-0 pb-2">Project settings (current project)</h3>
+<div class="flex items-center gap-2">
+<input class="form-checkbox h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800 text-primary focus:ring-primary focus:ring-2 focus:ring-offset-0 focus:ring-offset-white dark:focus:ring-offset-slate-900" id="inherit-settings" type="checkbox"/>
+<label class="text-base font-medium text-[#0d141b] dark:text-slate-300" for="inherit-settings">Inherit system setting</label>
+</div>
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">LLM provider</p>
+<select class="form-select h-11 w-full max-w-xs flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0">
+<option selected="">OpenAI</option>
+<option>Azure OpenAI</option>
+</select>
+</label>
+<div class="flex flex-col gap-4 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+<div class="flex items-center justify-end">
+<button class="flex items-center gap-2 text-sm font-semibold text-primary">
+<span class="material-symbols-outlined text-xl">expand_less</span>
+                                Collapse
+                            </button>
+</div>
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+<label class="flex flex-col">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">API_KEY</p>
+<div class="relative flex w-full flex-1 items-stretch">
+<input class="form-input h-11 w-full flex-1 resize-none overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 pr-10 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" type="password" value="••••••••••••••••••••••••••••••"/>
+<button class="absolute inset-y-0 right-0 flex items-center pr-3 text-[#4c739a] dark:text-slate-400">
+<span class="material-symbols-outlined text-xl">visibility</span>
+</button>
+</div>
+</label>
+<label class="flex flex-col sm:col-span-2">
+<p class="pb-2 text-base font-medium leading-normal text-[#0d141b] dark:text-slate-300">Available model names</p>
+<textarea class="form-textarea w-full flex-1 resize-y overflow-hidden rounded-lg border border-[#cfdbe7] dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-base font-normal leading-normal text-[#0d141b] dark:text-white placeholder:text-[#4c739a] dark:placeholder:text-slate-500 focus:border-primary focus:outline-0 focus:ring-0" placeholder="gpt-4o, gpt-4-turbo" rows="3"></textarea>
+</label>
+</div>
+</div>
+</section>
+</main>
+<footer class="flex items-center justify-end gap-3 border-t border-slate-200 dark:border-slate-800 p-4 sm:p-6">
+<button class="rounded-lg bg-slate-100 dark:bg-slate-800 px-4 py-2 text-base font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700">Cancel</button>
+<button class="rounded-lg bg-primary px-4 py-2 text-base font-semibold text-white hover:bg-primary/90">Save</button>
+</footer>
+</div>
+</div>
+</body></html>
