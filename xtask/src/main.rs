@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use patina_core::project::ProjectHandle;
 use patina_core::state::AppState;
-use patina_core::store::TranscriptStore;
 use patina_core::{llm::LlmDriver, telemetry};
 use std::sync::Arc;
+use tempfile::TempDir;
 use tokio::runtime::Runtime;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -32,9 +33,11 @@ fn main() -> Result<()> {
 
 fn smoke_test() -> Result<()> {
     let runtime = Runtime::new()?;
-    let store = TranscriptStore::in_memory();
+    let temp_dir = TempDir::new()?;
+    let project = ProjectHandle::create(temp_dir.path(), "SmokeProject")?;
+    let store = project.transcript_store();
     let driver = runtime.block_on(LlmDriver::fake());
-    let state = Arc::new(AppState::new(store, driver));
+    let state = Arc::new(AppState::with_store(project, store, driver));
 
     runtime.block_on(state.send_user_message("ping from xtask"))?;
     if let Some(conversation) = state.active_conversation() {
