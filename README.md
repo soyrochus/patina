@@ -1,5 +1,13 @@
 # Patina
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![Rust 1.90+](https://img.shields.io/badge/Rust-1.90%2B-orange.svg)
+[![Build: Cargo](https://img.shields.io/badge/Build-Cargo-8A2BE2.svg)](https://doc.rust-lang.org/cargo/)
+![OS: macOS | Linux | Windows](https://img.shields.io/badge/OS-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
+[![FOSS Pluralism Manifesto](https://img.shields.io/badge/Manifesto-FOSS%20Pluralism-8A2BE2.svg)](FOSS_PLURALISM_MANIFESTO.md)
+[![Contributions welcome](https://img.shields.io/badge/Contributions-welcome-brightgreen.svg)](https://github.com/soyrochus/patina/issues)
+
+
 ![Patina logo](images/patina-logo-min-transparent.png)
 
 Patina is a native desktop chat client built in Rust with an egui interface, designed to connect seamlessly with large language models (LLMs) through both cloud and local providers. The current implementation enables direct interaction with OpenAI models, providing a clean, responsive, and fully functional chat experience. While many advanced capabilities — such as local LLM integration and extended provider support — are still in active development, the application is evolving quickly toward a full-featured, independent alternative to proprietary AI clients.
