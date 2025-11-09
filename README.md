@@ -2,7 +2,9 @@
 
 ![Patina logo](images/patina-logo-min-transparent.png)
 
-Patina is a native desktop chat client written in Rust with an `egui` interface and a modular core that supports large language model (LLM) providers and Model Context Protocol (MCP) integrations. The workspace is split into multiple crates to encourage reuse, automated testing, and streamlined tooling.
+Patina is a native desktop chat client built in Rust with an `egui` interface, designed to connect seamlessly with large language models (LLMs) through both cloud and local providers. The current implementation enables direct interaction with OpenAI models, delivering complete replies as they become available as response streaming is still on the roadmap. As with other more advanced capabilities — such as local LLM integration and extended provider support — these are still under active development. The application is evolving quickly toward a full-featured, independent alternative to proprietary AI clients.
+
+Beyond serving as a chat interface, Patina is also conceived as an experimental platform for rapid AI integration and prototyping. Its modular design and support for the Model Context Protocol (MCP) allow developers to attach new agent models or services without altering the core code. This makes it ideal for fast iteration and experimentation, whether testing local LLMs, exploring new AI workflows, or building decoupled agent systems. As the project expands, Patina aims to remain both a practical everyday tool and a flexible testbed for AI-driven desktop innovation.
 
 **Patina Desktop in Light Mode**
 ![Patina in Light mode](images/patina-min-light.png)
@@ -25,7 +27,7 @@ Each crate has its own `Cargo.toml` and uses workspace dependencies declared at 
 ## Features
 
 - **Chat experience:** Markdown-rendered conversations with syntax highlighting for code blocks via `egui_commonmark` and `syntect`.
-- **LLM provider abstraction:** Unified driver for OpenAI, Azure OpenAI, and mock implementations with streaming-friendly APIs.
+- **LLM provider abstraction:** Unified driver for OpenAI, Azure OpenAI, and a mock provider used by tests. Streaming responses are planned but not yet implemented.
 - **Authentication orchestration:** Handles server- and client-managed OAuth modes with persisted secrets ready for reuse.
 - **MCP integration scaffolding:** JSON-RPC ready client registry capable of simulating tool invocations and auth handshakes.
 - **Persistent history:** Conversations are stored as JSON Lines files and reloaded on startup.
@@ -80,7 +82,7 @@ and uploads the artifacts as workflow outputs.
 
 ### app crate
 
-Implements the `eframe` application. It renders the conversation list, streaming message view, and message composer. Background tasks spawn on a dedicated Tokio runtime and synchronize with the UI using unbounded channels.
+Implements the `eframe` application. It renders the conversation list, message view, and composer. Background tasks spawn on a dedicated Tokio runtime and synchronize with the UI using unbounded channels. Streaming UI updates are planned, but the current client displays each response once it has fully completed.
 
 ### core crate
 
