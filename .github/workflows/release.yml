@@ -1,37 +1,53 @@
-name: Release Binaries
+name: Release (Linux + macOS arm64 + Windows)
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: [ "v*" ]     # e.g., v0.1.0
   workflow_dispatch:
+
+permissions:
+  contents: write      # needed to create/upload Release assets
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - name: Linux (x86_64 musl)
+            os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            binary_path: target/x86_64-unknown-linux-musl/release/patina
-            artifact_name: patina-linux-x86_64
+            bin_path: target/x86_64-unknown-linux-musl/release/patina
+            pkg_name: patina-linux-x86_64
             final_name: patina
-          - os: macos-latest
-            target: ""
-            binary_path: target/release/patina
-            artifact_name: patina-macos-arm64
+            archive_ext: tar.gz
+          - name: macOS (arm64)
+            os: macos-latest
+            target: ""   # host default: aarch64-apple-darwin
+            bin_path: target/release/patina
+            pkg_name: patina-macos-arm64
             final_name: patina
-          - os: windows-latest
-            target: ""
-            binary_path: target\\release\\patina.exe
-            artifact_name: patina-windows-x86_64.exe
+            archive_ext: zip
+          - name: Windows (x86_64)
+            os: windows-latest
+            target: ""   # host default: x86_64-pc-windows-msvc
+            bin_path: target\\release\\patina.exe
+            pkg_name: patina-windows-x86_64
             final_name: patina.exe
+            archive_ext: zip
+
     steps:
       - uses: actions/checkout@v4
+
+      # macOS: widen compatibility
+      - name: Set macOS deployment target (Monterey+)
+        if: matrix.os == 'macos-latest'
+        run: echo "MACOSX_DEPLOYMENT_TARGET=12.0" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -44,17 +60,20 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install Linux dependencies
+      # Linux musl target
+      - name: Install Linux deps (musl)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           rustup target add x86_64-unknown-linux-musl
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Install LLVM tools (Windows)
+      # Windows strip tool
+      - name: Install LLVM tools (Windows strip)
         if: matrix.os == 'windows-latest'
         run: rustup component add llvm-tools-preview
 
+      # Build
       - name: Build (custom target)
         if: matrix.target != ''
         run: cargo build --release --target ${{ matrix.target }}
@@ -63,39 +82,209 @@ jobs:
         if: matrix.target == ''
         run: cargo build --release
 
-      - name: Strip binary (Linux)
+      # Strip binaries
+      - name: Strip (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: strip ${{ matrix.binary_path }}
+        run: strip ${{ matrix.bin_path }}
 
-      - name: Strip binary (macOS)
+      - name: Strip (macOS)
         if: matrix.os == 'macos-latest'
-        run: strip -x ${{ matrix.binary_path }}
+        run: strip -x ${{ matrix.bin_path }}
 
-      - name: Strip binary (Windows)
+      - name: Strip (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $llvmStrip = (rustup which --toolchain stable llvm-objcopy) -replace 'llvm-objcopy', 'llvm-strip.exe'
           & $llvmStrip $Env:BINARY
         env:
-          BINARY: ${{ matrix.binary_path }}
+          BINARY: ${{ matrix.bin_path }}
 
-      - name: Prepare artifact (Unix)
+      # Stage package folder with README (per-OS content)
+      - name: Stage files (Unix)
         if: matrix.os != 'windows-latest'
         run: |
-          cp ${{ matrix.binary_path }} ${{ matrix.final_name }}
+          mkdir -p pkg
+          cp "${{ matrix.bin_path }}" "pkg/${{ matrix.final_name }}"
+          [ -f LICENSE ] && cp LICENSE pkg/
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cat > pkg/README.txt <<'EOF'
+Patina – macOS (arm64)
+======================
 
-      - name: Prepare artifact (Windows)
+This is an experimental, unsigned build for Apple Silicon. No certificates, no notarization.
+
+Requirements
+-----------
+- macOS 12.0 (Monterey) or newer
+- Apple Silicon (arm64). Intel Macs are not supported.
+
+Install & Run
+-------------
+1) Unzip this archive.
+2) In Finder, right-click the binary and choose “Open”, then confirm the dialog.
+   Alternatively in Terminal:
+     xattr -d com.apple.quarantine ./patina
+     ./patina --help
+
+Notes
+-----
+- Because this build is NOT signed or notarized, macOS Gatekeeper may warn you.
+- If you want to place it in your PATH (e.g., /usr/local/bin), you may need admin permissions.
+
+Integrity
+---------
+A SHA-256 checksum file is attached on the Release page.
+
+License
+-------
+See LICENSE (if included) or the repository.
+EOF
+          else
+            cat > pkg/README.txt <<'EOF'
+Patina – Linux (x86_64, musl)
+=============================
+
+This is an experimental, unsigned build linked against musl for broad portability.
+
+Requirements
+-----------
+- x86_64 Linux with a reasonably modern kernel
+
+Install & Run
+-------------
+1) Extract the tar.gz:
+     tar -xzf patina-linux-x86_64.tar.gz
+2) Ensure the binary is executable (should be):
+     chmod +x ./patina
+3) Run:
+     ./patina --help
+
+Notes
+-----
+- Built with musl for portability. If you hit TLS/crypto issues, prefer rustls-based crates.
+
+Integrity
+---------
+A SHA-256 checksum file is attached on the Release page.
+
+License
+-------
+See LICENSE (if included) or the repository.
+EOF
+          fi
+
+      - name: Stage files (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: Copy-Item $Env:BINARY $Env:FINAL
-        env:
-          BINARY: ${{ matrix.binary_path }}
-          FINAL: ${{ matrix.final_name }}
+        run: |
+          New-Item -ItemType Directory -Path pkg | Out-Null
+          Copy-Item "${{ matrix.bin_path }}" "pkg\${{ matrix.final_name }}"
+          if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
+          @"
+Patina – Windows (x86_64)
+=========================
 
+This is an experimental, unsigned build. No certification, no code signing.
+
+Requirements
+-----------
+- Windows 10 or 11 (x64)
+
+Install & Run
+-------------
+1) Unzip this archive.
+2) You may see Windows SmartScreen warn about an unrecognized app because it is UNSIGNED.
+   Options to proceed:
+   - Right-click the EXE → Properties → check "Unblock" → Apply → OK
+   - Or in PowerShell (from the ZIP folder):
+       Unblock-File .\patina.exe
+3) Run:
+   .\patina.exe --help
+
+Notes
+-----
+- Because there is NO code signing, SmartScreen warnings are expected.
+- Place the EXE anywhere you like; adding it to PATH is optional.
+
+Integrity
+---------
+A SHA-256 checksum file is attached on the Release page.
+
+License
+-------
+See LICENSE (if included) or the repository.
+"@ | Out-File -FilePath pkg\README.txt -Encoding utf8
+
+      # Package per-OS
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd pkg
+          /usr/bin/zip -r "../${{ matrix.pkg_name }}.zip" ./*
+          cd -
+          shasum -a 256 "${{ matrix.pkg_name }}.zip" > "${{ matrix.pkg_name }}.zip.SHA256"
+
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          tar -C pkg -czf "${{ matrix.pkg_name }}.tar.gz" ./*
+          shasum -a 256 "${{ matrix.pkg_name }}.tar.gz" > "${{ matrix.pkg_name }}.tar.gz.SHA256"
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.pkg_name }}.zip"
+          Get-FileHash "${{ matrix.pkg_name }}.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $env:PKG.zip" } | Out-File "${{ matrix.pkg_name }}.zip.SHA256" -Encoding ascii
+        env:
+          PKG: ${{ matrix.pkg_name }}
+
+      # Upload packaged artifacts for the release job
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.final_name }}
+          name: ${{ matrix.pkg_name }}-pkg
+          path: |
+            ${{ matrix.pkg_name }}.zip
+            ${{ matrix.pkg_name }}.zip.SHA256
           if-no-files-found: error
+        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+
+      - name: Upload artifact (Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg_name }}-pkg
+          path: |
+            ${{ matrix.pkg_name }}.tar.gz
+            ${{ matrix.pkg_name }}.tar.gz.SHA256
+          if-no-files-found: error
+        if: matrix.os == 'ubuntu-latest'
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la dist
+
+      - name: Create Release and upload assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/patina-linux-x86_64.tar.gz
+            dist/patina-linux-x86_64.tar.gz.SHA256
+            dist/patina-macos-arm64.zip
+            dist/patina-macos-arm64.zip.SHA256
+            dist/patina-windows-x86_64.zip
+            dist/patina-windows-x86_64.zip.SHA256
+          generate_release_notes: true
