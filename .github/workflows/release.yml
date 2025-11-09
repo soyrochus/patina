@@ -1,37 +1,58 @@
-name: Release Binaries
+name: Release (Linux + macOS arm64 + Windows)
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: [ "v*" ]     # e.g., v0.1.0
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - name: Linux (x86_64 musl)
+            os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            binary_path: target/x86_64-unknown-linux-musl/release/patina
-            artifact_name: patina-linux-x86_64
+            bin_path: target/x86_64-unknown-linux-musl/release/patina
+            pkg_name: patina-linux-x86_64
             final_name: patina
-          - os: macos-latest
-            target: ""
-            binary_path: target/release/patina
-            artifact_name: patina-macos-arm64
+            archive_ext: tar.gz
+            readme: packaging/README-linux.txt
+
+          - name: macOS (arm64)
+            os: macos-latest
+            target: ""   # host default: aarch64-apple-darwin
+            bin_path: target/release/patina
+            pkg_name: patina-macos-arm64
             final_name: patina
-          - os: windows-latest
-            target: ""
-            binary_path: target\\release\\patina.exe
-            artifact_name: patina-windows-x86_64.exe
+            archive_ext: zip
+            readme: packaging/README-macos.txt
+
+          - name: Windows (x86_64)
+            os: windows-latest
+            target: ""   # host default: x86_64-pc-windows-msvc
+            bin_path: target\\release\\patina.exe
+            pkg_name: patina-windows-x86_64
             final_name: patina.exe
+            archive_ext: zip
+            readme: packaging/README-windows.txt
+
     steps:
       - uses: actions/checkout@v4
+
+      # macOS: broaden compatibility
+      - name: Set macOS deployment target (Monterey+)
+        if: matrix.os == 'macos-latest'
+        run: echo "MACOSX_DEPLOYMENT_TARGET=12.0" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -44,17 +65,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install Linux dependencies
+      # Linux musl target
+      - name: Install Linux deps (musl)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           rustup target add x86_64-unknown-linux-musl
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Install LLVM tools (Windows)
-        if: matrix.os == 'windows-latest'
-        run: rustup component add llvm-tools-preview
-
+      # Build
       - name: Build (custom target)
         if: matrix.target != ''
         run: cargo build --release --target ${{ matrix.target }}
@@ -63,39 +82,103 @@ jobs:
         if: matrix.target == ''
         run: cargo build --release
 
-      - name: Strip binary (Linux)
+      # Strip binaries (skip Windows — keep it simple)
+      - name: Strip (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: strip ${{ matrix.binary_path }}
+        run: strip ${{ matrix.bin_path }}
 
-      - name: Strip binary (macOS)
+      - name: Strip (macOS)
         if: matrix.os == 'macos-latest'
-        run: strip -x ${{ matrix.binary_path }}
+        run: strip -x ${{ matrix.bin_path }}
 
-      - name: Strip binary (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $llvmStrip = (rustup which --toolchain stable llvm-objcopy) -replace 'llvm-objcopy', 'llvm-strip.exe'
-          & $llvmStrip $Env:BINARY
-        env:
-          BINARY: ${{ matrix.binary_path }}
-
-      - name: Prepare artifact (Unix)
+      # Stage package folder using external README files
+      - name: Stage files (Unix)
         if: matrix.os != 'windows-latest'
         run: |
-          cp ${{ matrix.binary_path }} ${{ matrix.final_name }}
+          test -f "${{ matrix.readme }}" || (echo "Missing ${{ matrix.readme }}" && exit 1)
+          mkdir -p pkg
+          cp "${{ matrix.bin_path }}" "pkg/${{ matrix.final_name }}"
+          cp "${{ matrix.readme }}" "pkg/README.txt"
+          [ -f LICENSE ] && cp LICENSE pkg/
 
-      - name: Prepare artifact (Windows)
+      - name: Stage files (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: Copy-Item $Env:BINARY $Env:FINAL
-        env:
-          BINARY: ${{ matrix.binary_path }}
-          FINAL: ${{ matrix.final_name }}
+        run: |
+          if (!(Test-Path "${{ matrix.readme }}")) { Write-Error "Missing ${{ matrix.readme }}"; exit 1 }
+          New-Item -ItemType Directory -Path pkg | Out-Null
+          Copy-Item "${{ matrix.bin_path }}" "pkg\${{ matrix.final_name }}"
+          Copy-Item "${{ matrix.readme }}" "pkg\README.txt"
+          if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
 
-      - name: Upload artifact
+      # Package per-OS
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd pkg
+          /usr/bin/zip -r "../${{ matrix.pkg_name }}.zip" ./*
+          cd -
+          shasum -a 256 "${{ matrix.pkg_name }}.zip" > "${{ matrix.pkg_name }}.zip.SHA256"
+
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          tar -C pkg -czf "${{ matrix.pkg_name }}.tar.gz" .
+          shasum -a 256 "${{ matrix.pkg_name }}.tar.gz" > "${{ matrix.pkg_name }}.tar.gz.SHA256"
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.pkg_name }}.zip"
+          $hash = (Get-FileHash "${{ matrix.pkg_name }}.zip" -Algorithm SHA256).Hash
+          "$hash  $PWD\${{ matrix.pkg_name }}.zip" | Out-File "${{ matrix.pkg_name }}.zip.SHA256" -Encoding ascii
+
+      # Upload packaged artifacts for the release job
+      - name: Upload artifact (macOS/Windows)
         uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.final_name }}
+          name: ${{ matrix.pkg_name }}-pkg
+          path: |
+            ${{ matrix.pkg_name }}.zip
+            ${{ matrix.pkg_name }}.zip.SHA256
           if-no-files-found: error
+
+      - name: Upload artifact (Linux)
+        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: ${{ matrix.pkg_name }}-pkg
+          path: |
+            ${{ matrix.pkg_name }}.tar.gz
+            ${{ matrix.pkg_name }}.tar.gz.SHA256
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la dist
+
+      - name: Create Release and upload assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/patina-linux-x86_64.tar.gz
+            dist/patina-linux-x86_64.tar.gz.SHA256
+            dist/patina-macos-arm64.zip
+            dist/patina-macos-arm64.zip.SHA256
+            dist/patina-windows-x86_64.zip
+            dist/patina-windows-x86_64.zip.SHA256
+          generate_release_notes: true
