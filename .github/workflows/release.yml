@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write      # needed to create/upload Release assets
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -73,11 +73,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      # Windows strip tool
-      - name: Install LLVM tools (Windows strip)
-        if: matrix.os == 'windows-latest'
-        run: rustup component add llvm-tools-preview
-
       # Build
       - name: Build (custom target)
         if: matrix.target != ''
@@ -87,7 +82,7 @@ jobs:
         if: matrix.target == ''
         run: cargo build --release
 
-      # Strip binaries
+      # Strip binaries (skip Windows — keep it simple)
       - name: Strip (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: strip ${{ matrix.bin_path }}
@@ -95,15 +90,6 @@ jobs:
       - name: Strip (macOS)
         if: matrix.os == 'macos-latest'
         run: strip -x ${{ matrix.bin_path }}
-
-      - name: Strip (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $llvmStrip = (rustup which --toolchain stable llvm-objcopy) -replace 'llvm-objcopy', 'llvm-strip.exe'
-          & $llvmStrip $Env:BINARY
-        env:
-          BINARY: ${{ matrix.bin_path }}
 
       # Stage package folder using external README files
       - name: Stage files (Unix)
@@ -137,7 +123,7 @@ jobs:
       - name: Package (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          tar -C pkg -czf "${{ matrix.pkg_name }}.tar.gz" ./*
+          tar -C pkg -czf "${{ matrix.pkg_name }}.tar.gz" .
           shasum -a 256 "${{ matrix.pkg_name }}.tar.gz" > "${{ matrix.pkg_name }}.tar.gz.SHA256"
 
       - name: Package (Windows)
@@ -146,7 +132,7 @@ jobs:
         run: |
           Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.pkg_name }}.zip"
           $hash = (Get-FileHash "${{ matrix.pkg_name }}.zip" -Algorithm SHA256).Hash
-          "$hash  $($env:GITHUB_WORKSPACE)\${{ matrix.pkg_name }}.zip" | Out-File "${{ matrix.pkg_name }}.zip.SHA256" -Encoding ascii
+          "$hash  $PWD\${{ matrix.pkg_name }}.zip" | Out-File "${{ matrix.pkg_name }}.zip.SHA256" -Encoding ascii
 
       # Upload packaged artifacts for the release job
       - name: Upload artifact (macOS/Windows)

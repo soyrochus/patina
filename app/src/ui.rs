@@ -125,6 +125,8 @@ pub struct MenuBarState {
 
 #[derive(Default)]
 pub struct MenuBarOutput {
+    pub new_project: bool,
+    pub open_project: bool,
     pub new_chat: bool,
     pub toggle_sidebar: bool,
     pub focus_search: bool,
@@ -141,6 +143,7 @@ impl MenuBar {
         ui: &mut egui::Ui,
         state: &mut MenuBarState,
         logo_texture: Option<&egui::TextureHandle>,
+        project_available: bool,
     ) -> MenuBarOutput {
         let mut output = MenuBarOutput::default();
         egui::menu::bar(ui, |ui| {
@@ -151,7 +154,19 @@ impl MenuBar {
                 }
                 ui.label(RichText::new("Patina").strong());
                 ui.menu_button("File", |ui| {
-                    if ui.button("New chat\tCtrl+N").clicked() {
+                    if ui.button("New Project…").clicked() {
+                        output.new_project = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Open Project…").clicked() {
+                        output.open_project = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui
+                        .add_enabled(project_available, egui::Button::new("New chat\tCtrl+N"))
+                        .clicked()
+                    {
                         output.new_chat = true;
                         ui.close_menu();
                     }
@@ -161,17 +176,29 @@ impl MenuBar {
                     }
                 });
                 ui.menu_button("Edit", |ui| {
-                    if ui.button("Clear input").clicked() {
+                    if ui
+                        .add_enabled(project_available, egui::Button::new("Clear input"))
+                        .clicked()
+                    {
                         output.clear_input = true;
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("View", |ui| {
-                    if ui.button("Toggle sidebar\tCtrl+M").clicked() {
+                    if ui
+                        .add_enabled(
+                            project_available,
+                            egui::Button::new("Toggle sidebar\tCtrl+M"),
+                        )
+                        .clicked()
+                    {
                         output.toggle_sidebar = true;
                         ui.close_menu();
                     }
-                    if ui.button("Focus search\tCtrl+K").clicked() {
+                    if ui
+                        .add_enabled(project_available, egui::Button::new("Focus search\tCtrl+K"))
+                        .clicked()
+                    {
                         output.focus_search = true;
                         ui.close_menu();
                     }

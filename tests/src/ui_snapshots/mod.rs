@@ -1,10 +1,11 @@
 use egui::{self, RawInput};
 use patina::ui::ThemeMode;
 use patina::{render_ui, PatinaEguiApp, UiSettingsStore};
-use patina_core::{llm::LlmDriver, state::AppState, store::TranscriptStore};
+use patina_core::{llm::LlmDriver, project::ProjectHandle, state::AppState};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 fn test_runtime() -> Runtime {
@@ -16,16 +17,20 @@ fn test_runtime() -> Runtime {
 
 fn build_app(theme: ThemeMode) -> PatinaEguiApp {
     let runtime = Arc::new(test_runtime());
-    let store = TranscriptStore::in_memory();
+    let temp_dir = TempDir::new().expect("temp dir");
+    let project = ProjectHandle::create(temp_dir.path(), "SnapshotProject").expect("project");
+    let store = project.transcript_store();
     let driver = runtime.block_on(LlmDriver::fake());
-    let state = Arc::new(AppState::new(store, driver));
-    runtime
-        .block_on(state.send_user_message("Seed snapshot conversation"))
-        .expect("seed message");
-
+    {
+        let seeded_driver = driver.clone();
+        let state = AppState::with_store(project.clone(), store, seeded_driver);
+        runtime
+            .block_on(state.send_user_message("Seed snapshot conversation"))
+            .expect("seed message");
+    }
     let mut settings = UiSettingsStore::temporary();
     settings.data_mut().theme_mode = theme;
-    PatinaEguiApp::new(state, runtime, settings)
+    PatinaEguiApp::new(Some(project), driver, runtime, settings)
 }
 
 fn capture_snapshot(app: &mut PatinaEguiApp) -> String {

@@ -12,3 +12,4 @@ patina = { path = "../app" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 egui = "0.26"
+tempfile = { workspace = true }
