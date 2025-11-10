@@ -280,12 +280,14 @@ fn mac_paths() -> Vec<PathBuf> {
 fn windows_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        paths.push(PathBuf::from(appdata).join("Patina").join("patina.yaml"));
-        paths.push(PathBuf::from(appdata).join("Patina").join("patina.yml"));
+        let base = PathBuf::from(appdata);
+        paths.push(base.join("Patina").join("patina.yaml"));
+        paths.push(base.join("Patina").join("patina.yml"));
     }
     if let Some(home) = std::env::var_os("USERPROFILE") {
-        paths.push(PathBuf::from(home).join(".patina").join("patina.yaml"));
-        paths.push(PathBuf::from(home).join(".patina").join("patina.yml"));
+        let base = PathBuf::from(home);
+        paths.push(base.join(".patina").join("patina.yaml"));
+        paths.push(base.join(".patina").join("patina.yml"));
     }
     paths
 }
