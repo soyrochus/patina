@@ -36,3 +36,4 @@ toml = "0.8"
 walkdir = "2.5"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 tempfile = "3.10"
+url = "2.4"

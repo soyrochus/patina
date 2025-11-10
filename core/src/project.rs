@@ -2,6 +2,7 @@ use crate::store::TranscriptStore;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_yaml::{Mapping, Number, Value};
 use std::fs;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
@@ -15,6 +16,7 @@ pub struct ProjectPaths {
     pub pat_file: PathBuf,
     pub internal: PathBuf,
     pub conversations: PathBuf,
+    pub metadata: PathBuf,
 }
 
 impl ProjectPaths {
@@ -23,12 +25,14 @@ impl ProjectPaths {
         pat_file: PathBuf,
         internal: PathBuf,
         conversations: PathBuf,
+        metadata: PathBuf,
     ) -> Self {
         Self {
             root,
             pat_file,
             internal,
             conversations,
+            metadata,
         }
     }
 }
@@ -105,6 +109,7 @@ impl ProjectHandle {
         }
 
         let pat_path = root.join(format!("{}.pat", manifest_name));
+        let metadata_path = root.join(format!("{}.path", manifest_name));
 
         let manifest = ProjectManifest {
             version: 1,
@@ -132,11 +137,20 @@ impl ProjectHandle {
             )
         })?;
 
+        initialize_metadata_file(&metadata_path)?;
+
         let serialized = toml::to_string_pretty(&manifest)?;
         fs::write(&pat_path, serialized)
             .with_context(|| format!("failed to write manifest at {}", pat_path.display()))?;
 
-        Self::open(&root)
+        let paths = ProjectPaths::new(
+            root.clone(),
+            pat_path,
+            internal_dir,
+            conversations_dir,
+            metadata_path,
+        );
+        Ok(Self { manifest, paths })
     }
 
     pub fn open(from: &Path) -> Result<Self> {
@@ -174,6 +188,7 @@ impl ProjectHandle {
 
         let internal = normalize_relative_path(&root, &manifest.paths.internal)?;
         let conversations = normalize_relative_path(&root, &manifest.paths.conversations)?;
+        let metadata_path = root.join(format!("{}.path", manifest.name));
 
         if !internal.starts_with(&root) {
             return Err(anyhow!("internal path escapes project root"));
@@ -195,7 +210,15 @@ impl ProjectHandle {
             )
         })?;
 
-        let paths = ProjectPaths::new(root.clone(), pat_file, internal, conversations);
+        initialize_metadata_file(&metadata_path)?;
+
+        let paths = ProjectPaths::new(
+            root.clone(),
+            pat_file,
+            internal,
+            conversations,
+            metadata_path,
+        );
 
         Ok(Self { manifest, paths })
     }
@@ -315,6 +338,39 @@ impl ProjectHandle {
     pub fn transcript_store(&self) -> TranscriptStore {
         TranscriptStore::new(self.paths.internal.clone())
     }
+
+    pub fn metadata_path(&self) -> &Path {
+        &self.paths.metadata
+    }
+}
+
+fn initialize_metadata_file(path: &Path) -> Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create metadata directory at {}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut root = Mapping::new();
+    root.insert(
+        Value::String("version".to_string()),
+        Value::Number(Number::from(1)),
+    );
+    let mut settings = Mapping::new();
+    settings.insert(Value::String("inherit_app".to_string()), Value::Bool(true));
+    root.insert(
+        Value::String("settings".to_string()),
+        Value::Mapping(settings),
+    );
+    let serialized = serde_yaml::to_string(&Value::Mapping(root))?;
+    fs::write(path, serialized)
+        .with_context(|| format!("failed to initialize metadata file at {}", path.display()))?;
+    Ok(())
 }
 
 fn normalize_relative_path(root: &Path, relative: &str) -> Result<PathBuf> {

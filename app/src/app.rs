@@ -4,6 +4,7 @@ const ABOUT_LOGO_MAX_WIDTH: f32 = 240.0;
 
 use crate::{
     assets,
+    settings::SettingsPanel,
     ui::{
         ChatPanel, ChatPanelState, InputBar, InputBarOutput, InputBarState, McpSidebarEntry,
         McpStatus, MenuBar, MenuBarOutput, MenuBarState, Sidebar, SidebarOutput, SidebarState,
@@ -52,6 +53,7 @@ pub struct PatinaEguiApp {
     chat_panel_state: ChatPanelState,
     markdown_cache: CommonMarkCache,
     settings: UiSettingsStore,
+    settings_panel: SettingsPanel,
     palette: ThemePalette,
     system_theme: Option<eframe::Theme>,
     error: Option<String>,
@@ -69,8 +71,13 @@ impl PatinaEguiApp {
         project: Option<ProjectHandle>,
         driver: LlmDriver,
         runtime: Arc<Runtime>,
-        settings: UiSettingsStore,
+        mut settings: UiSettingsStore,
     ) -> Self {
+        let settings_panel = SettingsPanel::new();
+        let global_theme = settings_panel.app_settings().theme;
+        if settings.data().theme_mode != global_theme {
+            settings.data_mut().theme_mode = global_theme;
+        }
         let (tx, rx) = unbounded_channel();
         let mut app = Self {
             state: None,
@@ -79,7 +86,7 @@ impl PatinaEguiApp {
             tx,
             rx,
             menu_state: MenuBarState {
-                theme_mode: settings.data().theme_mode,
+                theme_mode: global_theme,
             },
             sidebar_state: {
                 let mut sidebar = SidebarState::new();
@@ -94,7 +101,11 @@ impl PatinaEguiApp {
             chat_panel_state: ChatPanelState::default(),
             markdown_cache: CommonMarkCache::default(),
             settings,
-            palette: ThemePalette::for_dark(),
+            settings_panel,
+            palette: match global_theme {
+                ThemeMode::Light => ThemePalette::for_light(),
+                _ => ThemePalette::for_dark(),
+            },
             system_theme: None,
             error: None,
             mcp_entries: default_mcp_entries(),
@@ -116,6 +127,7 @@ impl PatinaEguiApp {
                 data.current_project = None;
                 data.last_conversation = None;
             }
+            app.settings_panel.set_project(None);
             app.pending_title = Some("Patina".to_string());
         }
         app
@@ -351,12 +363,18 @@ impl PatinaEguiApp {
                 opened: Instant::now(),
             });
         }
+        if output.show_settings {
+            self.settings_panel.open();
+        }
         if output.exit {
             self.pending_exit = true;
         }
         if let Some(mode) = output.theme_changed {
             self.menu_state.theme_mode = mode;
             self.settings.data_mut().theme_mode = mode;
+            if let Err(err) = self.settings_panel.apply_theme_selection(mode) {
+                error!(error = ?err, "Failed to persist theme change");
+            }
         }
     }
 
@@ -484,6 +502,7 @@ impl PatinaEguiApp {
     }
 
     fn activate_project(&mut self, project: ProjectHandle) {
+        self.settings_panel.set_project(Some(&project));
         let last_selected = self.settings.data().last_conversation;
         let state = Arc::new(AppState::new(project.clone(), self.driver.clone()));
         if let Some(last) = last_selected {
@@ -603,6 +622,7 @@ impl PatinaEguiApp {
         }
         self.ensure_logo_texture(ctx);
         self.layout(ctx);
+        self.show_settings_panel(ctx);
         self.draw_about_dialog(ctx);
         self.capture_window_size(ctx);
         self.flush_settings_if_needed();
@@ -700,6 +720,24 @@ impl PatinaEguiApp {
 
         if should_close {
             self.about_mode = None;
+        }
+    }
+
+    fn show_settings_panel(&mut self, ctx: &egui::Context) {
+        let response = self.settings_panel.show(ctx, &self.palette);
+        if response.app_saved {
+            if let Some(theme) = response.theme_changed {
+                if self.menu_state.theme_mode != theme {
+                    self.menu_state.theme_mode = theme;
+                    if self.settings.data().theme_mode != theme {
+                        self.settings.data_mut().theme_mode = theme;
+                    }
+                    self.apply_theme(ctx);
+                }
+            }
+        }
+        if response.project_saved {
+            // Placeholder for future integration (e.g., reload drivers)
         }
     }
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmProviderKind {
     OpenAi,

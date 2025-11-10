@@ -239,7 +239,15 @@ fn linux_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(base) = BaseDirs::new() {
         paths.push(base.config_dir().join("patina").join("patina.yaml"));
+        paths.push(base.config_dir().join("patina").join("patina.yml"));
+        paths.push(
+            base.home_dir()
+                .join("config")
+                .join("patina")
+                .join("patina.yml"),
+        );
         paths.push(base.home_dir().join(".patina").join("patina.yaml"));
+        paths.push(base.home_dir().join(".patina").join("patina.yml"));
     }
     paths
 }
@@ -255,7 +263,15 @@ fn mac_paths() -> Vec<PathBuf> {
                 .join("Patina")
                 .join("patina.yaml"),
         );
+        paths.push(
+            base.home_dir()
+                .join("Library")
+                .join("Application Support")
+                .join("Patina")
+                .join("patina.yml"),
+        );
         paths.push(base.home_dir().join(".patina").join("patina.yaml"));
+        paths.push(base.home_dir().join(".patina").join("patina.yml"));
     }
     paths
 }
@@ -265,9 +281,11 @@ fn windows_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(appdata) = std::env::var_os("APPDATA") {
         paths.push(PathBuf::from(appdata).join("Patina").join("patina.yaml"));
+        paths.push(PathBuf::from(appdata).join("Patina").join("patina.yml"));
     }
     if let Some(home) = std::env::var_os("USERPROFILE") {
         paths.push(PathBuf::from(home).join(".patina").join("patina.yaml"));
+        paths.push(PathBuf::from(home).join(".patina").join("patina.yml"));
     }
     paths
 }

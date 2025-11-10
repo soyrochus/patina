@@ -133,6 +133,7 @@ pub struct MenuBarOutput {
     pub clear_input: bool,
     pub exit: bool,
     pub show_about: bool,
+    pub show_settings: bool,
     pub theme_changed: Option<ThemeMode>,
 }
 
@@ -160,6 +161,11 @@ impl MenuBar {
                     }
                     if ui.button("Open Project…").clicked() {
                         output.open_project = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Settings…").clicked() {
+                        output.show_settings = true;
                         ui.close_menu();
                     }
                     ui.separator();
