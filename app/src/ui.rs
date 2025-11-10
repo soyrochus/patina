@@ -145,6 +145,7 @@ impl MenuBar {
         state: &mut MenuBarState,
         logo_texture: Option<&egui::TextureHandle>,
         project_available: bool,
+        project_name: Option<&str>,
     ) -> MenuBarOutput {
         let mut output = MenuBarOutput::default();
         egui::menu::bar(ui, |ui| {
@@ -153,7 +154,14 @@ impl MenuBar {
                 if let Some(texture) = logo_texture {
                     ui.image((texture.id(), egui::vec2(18.0, 18.0)));
                 }
-                ui.label(RichText::new("Patina").strong());
+                if let Some(name) = project_name {
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(format!("Workspace: {name}"))
+                            .small()
+                            .color(ui.visuals().text_color()),
+                    );
+                }
                 ui.menu_button("File", |ui| {
                     if ui.button("New Project…").clicked() {
                         output.new_project = true;

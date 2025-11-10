@@ -64,6 +64,7 @@ pub struct PatinaEguiApp {
     about_mode: Option<AboutMode>,
     pending_exit: bool,
     pending_title: Option<String>,
+    current_workspace: Option<String>,
 }
 
 impl PatinaEguiApp {
@@ -117,6 +118,7 @@ impl PatinaEguiApp {
             }),
             pending_exit: false,
             pending_title: None,
+            current_workspace: None,
         };
         app.refresh_pinned_cache();
         if let Some(project) = project {
@@ -129,6 +131,7 @@ impl PatinaEguiApp {
             }
             app.settings_panel.set_project(None);
             app.pending_title = Some("Patina".to_string());
+            app.current_workspace = None;
         }
         app
     }
@@ -206,6 +209,7 @@ impl PatinaEguiApp {
                     &mut self.menu_state,
                     self.logo_texture.as_ref(),
                     project_loaded,
+                    self.current_workspace.as_deref(),
                 );
                 self.handle_menu_output(output);
                 if let Some(err) = &self.error {
@@ -513,6 +517,7 @@ impl PatinaEguiApp {
         self.remember_project(&project);
         self.refresh_pinned_cache();
         self.pending_title = Some(format!("Patina — {}", project.name()));
+        self.current_workspace = Some(project.name().to_string());
         self.sync_last_conversation();
     }
 
