@@ -2361,6 +2361,7 @@ dependencies = [
  "serde_yaml",
  "syntect",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "url",

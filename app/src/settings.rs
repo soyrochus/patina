@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use toml::Value as TomlValue;
 use tracing::warn;
 use url::Url;
 
@@ -374,7 +375,7 @@ pub struct GlobalSettingsStore {
 impl GlobalSettingsStore {
     pub fn load() -> Self {
         let path = global_config_path();
-        let document = load_document(&path);
+        let document = load_yaml_document(&path);
         let data = extract_app_settings(&document);
         Self {
             path,
@@ -417,14 +418,14 @@ impl GlobalSettingsStore {
 
 pub struct ProjectSettingsStore {
     path: PathBuf,
-    document: Value,
+    document: TomlValue,
     data: ProjectSettingsData,
     dirty: bool,
 }
 
 impl ProjectSettingsStore {
     pub fn load(path: PathBuf) -> Self {
-        let document = load_document(&path);
+        let document = load_manifest(&path);
         let data = extract_project_settings(&document);
         Self {
             path,
@@ -448,9 +449,9 @@ impl ProjectSettingsStore {
             return Ok(());
         }
         let mut value = self.document.clone();
-        let mapping = ensure_mapping(&mut value);
-        let serialized = serde_yaml::to_value(self.data.to_file())?;
-        mapping.insert(Value::String("settings".to_string()), serialized);
+        let table = ensure_toml_table(&mut value);
+        let serialized = TomlValue::try_from(self.data.to_file())?;
+        table.insert("settings".to_string(), serialized);
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!(
@@ -459,7 +460,7 @@ impl ProjectSettingsStore {
                 )
             })?;
         }
-        let contents = serde_yaml::to_string(&value)?;
+        let contents = toml::to_string_pretty(&value)?;
         fs::write(&self.path, contents).with_context(|| {
             format!(
                 "failed to write project settings to {}",
@@ -472,7 +473,7 @@ impl ProjectSettingsStore {
     }
 }
 
-fn load_document(path: &Path) -> Value {
+fn load_yaml_document(path: &Path) -> Value {
     match fs::read_to_string(path) {
         Ok(contents) => match serde_yaml::from_str::<Value>(&contents) {
             Ok(value) => value,
@@ -490,6 +491,31 @@ fn load_document(path: &Path) -> Value {
     }
 }
 
+fn load_manifest(path: &Path) -> TomlValue {
+    match fs::read_to_string(path) {
+        Ok(contents) => match contents.parse::<TomlValue>() {
+            Ok(value) => value,
+            Err(err) => {
+                warn!("Failed to parse {}: {err}", path.display());
+                TomlValue::Table(toml::map::Map::new())
+            }
+        },
+        Err(err) => {
+            warn!("Failed to read {}: {err}", path.display());
+            TomlValue::Table(toml::map::Map::new())
+        }
+    }
+}
+
+fn ensure_toml_table(value: &mut TomlValue) -> &mut toml::map::Map<String, TomlValue> {
+    if !value.is_table() {
+        *value = TomlValue::Table(toml::map::Map::new());
+    }
+    value
+        .as_table_mut()
+        .expect("value converted to table in ensure_toml_table")
+}
+
 fn extract_app_settings(document: &Value) -> AppSettingsData {
     let section = document
         .get("app")
@@ -499,13 +525,20 @@ fn extract_app_settings(document: &Value) -> AppSettingsData {
     AppSettingsData::from_file(file)
 }
 
-fn extract_project_settings(document: &Value) -> ProjectSettingsData {
-    let section = document
-        .get("settings")
-        .cloned()
-        .unwrap_or(Value::Mapping(Mapping::new()));
-    let file: ProjectSettingsFile = serde_yaml::from_value(section).unwrap_or_default();
-    ProjectSettingsData::from_file(file)
+fn extract_project_settings(document: &TomlValue) -> ProjectSettingsData {
+    if let Some(section) = document.get("settings") {
+        match section.clone().try_into::<ProjectSettingsFile>() {
+            Ok(file) => ProjectSettingsData::from_file(file),
+            Err(err) => {
+                warn!(
+                    "Failed to decode project settings from manifest: {err}; falling back to defaults"
+                );
+                ProjectSettingsData::default()
+            }
+        }
+    } else {
+        ProjectSettingsData::default()
+    }
 }
 
 fn global_config_path() -> PathBuf {
