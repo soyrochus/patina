@@ -67,6 +67,58 @@ cargo run -p patina
 
 The first launch creates a data directory under your platform’s application data folder (for example, `~/Library/Application Support/Patina` on macOS). Conversations persist between sessions.
 
+
+Here’s the same section rewritten to perfectly match the tone, structure, and indentation style of your current **README.md** — consistent headings, spacing, and formatting conventions included:
+
+---
+
+## Configuring AI Settings
+
+Patina allows you to configure and fine-tune AI behavior directly through the **Settings** window — without editing configuration files manually.
+
+**Patina Settings UI**
+
+![Patina Settings UI](images/settings-ui.png)
+
+### App Settings
+
+The **App Settings** panel defines global parameters that apply across all projects:
+
+* **Theme** — choose between *System*, *Light*, or *Dark* mode
+* **LLM Provider** — select your preferred provider (currently *OpenAI*; others planned)
+* **Provider Details** — enter API key, endpoint, API version, and deployment name
+* **Available Model Names** — provide a comma- or semicolon-separated list of model names
+
+These preferences are stored automatically in the user configuration directory:
+
+```text
+Linux:   ~/.config/patina/ui_settings.json
+macOS:   ~/Library/Application Support/Patina/ui_settings.json
+Windows: %APPDATA%\Patina\ui_settings.json
+```
+
+### Project Settings
+
+Each project can either inherit the global settings or define its own configuration.
+Within the **Project Settings** section you can:
+
+* Enable **Inherit system settings** to reuse global configuration
+* Disable it to specify project-specific provider details and model lists
+
+Project-specific configuration files are stored inside the project folder:
+
+```text
+<project>/.patina/ui_settings.json
+<project>/.patina/patina.yaml
+```
+
+### Configuration Logic
+
+* The list of **available models** is loaded from `patina.yaml`
+* The **current selection** (model, temperature, and theme) is stored in `ui_settings.json`
+* Any change in the Settings UI is applied immediately and persists between sessions
+* No environment variables or `.env` files are used — configuration is entirely file-based
+
 ### Running automated tests
 
 ```
