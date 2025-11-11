@@ -39,7 +39,7 @@ fn smoke_test() -> Result<()> {
     let driver = runtime.block_on(LlmDriver::fake());
     let state = Arc::new(AppState::with_store(project, store, driver));
 
-    runtime.block_on(state.send_user_message("ping from xtask"))?;
+    runtime.block_on(state.send_user_message("ping from xtask", "mock", 0.6))?;
     if let Some(conversation) = state.active_conversation() {
         info!(
             "messages" = conversation.messages.len(),

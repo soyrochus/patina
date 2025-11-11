@@ -4,6 +4,7 @@
 # Local config file
 # Env variables 
 .env
+local.env
 
 #l Local test / mock data
 

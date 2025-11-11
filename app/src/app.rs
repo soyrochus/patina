@@ -4,6 +4,7 @@ const ABOUT_LOGO_MAX_WIDTH: f32 = 240.0;
 
 use crate::{
     assets,
+    config::{self, ProviderConfig, Scope, UiSettings},
     settings::SettingsPanel,
     ui::{
         ChatPanel, ChatPanelState, InputBar, InputBarOutput, InputBarState, McpSidebarEntry,
@@ -19,10 +20,8 @@ use patina_core::project::ProjectHandle;
 use patina_core::state::AppState;
 use patina_core::{llm::LlmDriver, LlmStatus};
 use rfd::FileDialog;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -31,7 +30,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-const SETTINGS_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 const SPLASH_DURATION: Duration = Duration::from_secs(1);
 const MANUAL_DISMISS_DELAY: Duration = Duration::from_millis(150);
 
@@ -39,6 +37,13 @@ const MANUAL_DISMISS_DELAY: Duration = Duration::from_millis(150);
 enum AboutMode {
     Splash { opened: Instant },
     Manual { opened: Instant },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelValidation {
+    Ready,
+    MissingModels,
+    InvalidSelection,
 }
 
 pub struct PatinaEguiApp {
@@ -52,19 +57,23 @@ pub struct PatinaEguiApp {
     input_state: InputBarState,
     chat_panel_state: ChatPanelState,
     markdown_cache: CommonMarkCache,
-    settings: UiSettingsStore,
+    scope: Scope,
+    ui_settings: UiSettings,
+    provider_config: ProviderConfig,
     settings_panel: SettingsPanel,
     palette: ThemePalette,
     system_theme: Option<eframe::Theme>,
     error: Option<String>,
     mcp_entries: Vec<McpSidebarEntry>,
     pinned_lookup: HashSet<Uuid>,
-    last_settings_flush: Instant,
     logo_texture: Option<egui::TextureHandle>,
     about_mode: Option<AboutMode>,
     pending_exit: bool,
     pending_title: Option<String>,
     current_workspace: Option<String>,
+    pending_save: Option<tokio::task::JoinHandle<()>>,
+    pending_provider_reload: Option<tokio::task::JoinHandle<Result<ProviderConfig>>>,
+    validation_error: Option<String>,
 }
 
 impl PatinaEguiApp {
@@ -72,12 +81,14 @@ impl PatinaEguiApp {
         project: Option<ProjectHandle>,
         driver: LlmDriver,
         runtime: Arc<Runtime>,
-        mut settings: UiSettingsStore,
+        scope: Scope,
+        mut ui_settings: UiSettings,
+        provider_config: ProviderConfig,
     ) -> Self {
         let settings_panel = SettingsPanel::new();
         let global_theme = settings_panel.app_settings().theme;
-        if settings.data().theme_mode != global_theme {
-            settings.data_mut().theme_mode = global_theme;
+        if ui_settings.theme_mode != global_theme {
+            ui_settings.theme_mode = global_theme;
         }
         let (tx, rx) = unbounded_channel();
         let mut app = Self {
@@ -91,17 +102,19 @@ impl PatinaEguiApp {
             },
             sidebar_state: {
                 let mut sidebar = SidebarState::new();
-                sidebar.collapsed = !settings.data().sidebar_visible;
+                sidebar.collapsed = !ui_settings.sidebar_visible;
                 sidebar
             },
             input_state: InputBarState::new(
-                settings.data().model.clone(),
-                settings.data().temperature,
-                settings.data().retain_input,
+                ui_settings.model.clone(),
+                ui_settings.temperature,
+                ui_settings.retain_input,
             ),
             chat_panel_state: ChatPanelState::default(),
             markdown_cache: CommonMarkCache::default(),
-            settings,
+            scope,
+            ui_settings,
+            provider_config,
             settings_panel,
             palette: match global_theme {
                 ThemeMode::Light => ThemePalette::for_light(),
@@ -111,7 +124,6 @@ impl PatinaEguiApp {
             error: None,
             mcp_entries: default_mcp_entries(),
             pinned_lookup: HashSet::new(),
-            last_settings_flush: Instant::now(),
             logo_texture: None,
             about_mode: Some(AboutMode::Splash {
                 opened: Instant::now(),
@@ -119,19 +131,22 @@ impl PatinaEguiApp {
             pending_exit: false,
             pending_title: None,
             current_workspace: None,
+            pending_save: None,
+            pending_provider_reload: None,
+            validation_error: None,
         };
         app.refresh_pinned_cache();
         if let Some(project) = project {
             app.activate_project(project);
         } else {
             {
-                let data = app.settings.data_mut();
-                data.current_project = None;
-                data.last_conversation = None;
+                app.ui_settings.current_project = None;
+                app.ui_settings.last_conversation = None;
             }
             app.settings_panel.set_project(None);
             app.pending_title = Some("Patina".to_string());
             app.current_workspace = None;
+            app.spawn_save();
         }
         app
     }
@@ -143,6 +158,30 @@ impl PatinaEguiApp {
                 self.error = Some(err.to_string());
             } else {
                 self.error = None;
+            }
+        }
+    }
+
+    fn poll_provider_config_reload(&mut self) {
+        if let Some(handle) = self.pending_provider_reload.take() {
+            if handle.is_finished() {
+                match self.runtime.block_on(handle) {
+                    Ok(Ok(config)) => {
+                        self.provider_config = config;
+                        self.error = None;
+                        self.validation_error = None;
+                    }
+                    Ok(Err(err)) => {
+                        error!(error = ?err, "Failed to reload provider config");
+                        self.error = Some(format!("Failed to reload provider config: {err}"));
+                    }
+                    Err(err) => {
+                        error!(error = ?err, "Provider config task failed");
+                        self.error = Some(format!("Provider config task failed: {err}"));
+                    }
+                }
+            } else {
+                self.pending_provider_reload = Some(handle);
             }
         }
     }
@@ -219,11 +258,9 @@ impl PatinaEguiApp {
                     ui.add_space(4.0);
                     ui.colored_label(self.palette.warning, message);
                     ui.label(
-                        RichText::new(
-                            "Set OPENAI_/AZURE_ env vars or create patina.yaml to enable AI.",
-                        )
-                        .color(self.palette.text_secondary)
-                        .small(),
+                        RichText::new("Update patina.yaml to configure AI access.")
+                            .color(self.palette.text_secondary)
+                            .small(),
                     );
                 }
             });
@@ -250,12 +287,12 @@ impl PatinaEguiApp {
                     });
             } else {
                 let summaries = state.conversation_summaries();
-                let pinned_order = self.settings.data().pinned_chats.clone();
+                let pinned_order = self.ui_settings.pinned_chats.clone();
 
                 let response = egui::SidePanel::left("sidebar")
                     .resizable(true)
                     .min_width(220.0)
-                    .default_width(self.settings.data().sidebar_width)
+                    .default_width(self.ui_settings.sidebar_width)
                     .frame(
                         egui::Frame::none()
                             .fill(self.palette.sidebar_background)
@@ -287,8 +324,9 @@ impl PatinaEguiApp {
                     });
 
                 let width = response.response.rect.width();
-                if (self.settings.data().sidebar_width - width).abs() > 1.0 {
-                    self.settings.data_mut().sidebar_width = width;
+                if (self.ui_settings.sidebar_width - width).abs() > 1.0 {
+                    self.ui_settings.sidebar_width = width;
+                    self.spawn_save();
                 }
             }
 
@@ -299,8 +337,18 @@ impl PatinaEguiApp {
                         .inner_margin(Margin::same(12.0)),
                 )
                 .show(ctx, |ui| {
-                    let input_output = InputBar::show(ui, &mut self.input_state, &self.palette);
+                    let model_valid = matches!(self.model_validation(), ModelValidation::Ready);
+                    let input_output = InputBar::show(
+                        ui,
+                        &mut self.input_state,
+                        &self.palette,
+                        &self.provider_config.available_models,
+                        model_valid,
+                    );
                     self.handle_input_output(input_output);
+                    self.input_state.selected_model = self.ui_settings.model.clone();
+                    self.input_state.temperature = self.ui_settings.temperature;
+                    self.input_state.retain_input = self.ui_settings.retain_input;
                 });
 
             egui::CentralPanel::default()
@@ -375,7 +423,8 @@ impl PatinaEguiApp {
         }
         if let Some(mode) = output.theme_changed {
             self.menu_state.theme_mode = mode;
-            self.settings.data_mut().theme_mode = mode;
+            self.ui_settings.theme_mode = mode;
+            self.spawn_save();
             if let Err(err) = self.settings_panel.apply_theme_selection(mode) {
                 error!(error = ?err, "Failed to persist theme change");
             }
@@ -404,7 +453,8 @@ impl PatinaEguiApp {
                     if let Some(active) = state.active_conversation() {
                         self.update_last_conversation(active.id);
                     } else {
-                        self.settings.data_mut().last_conversation = None;
+                        self.ui_settings.last_conversation = None;
+                        self.spawn_save();
                     }
                 }
                 Ok(false) => {}
@@ -435,13 +485,16 @@ impl PatinaEguiApp {
             self.input_state.draft.clear();
         }
         if let Some(model) = output.model_changed {
-            self.settings.data_mut().model = model;
+            self.ui_settings.model = model;
+            self.spawn_save();
         }
         if let Some(temp) = output.temperature_changed {
-            self.settings.data_mut().temperature = temp;
+            self.ui_settings.temperature = temp;
+            self.spawn_save();
         }
-        if self.settings.data().retain_input != self.input_state.retain_input {
-            self.settings.data_mut().retain_input = self.input_state.retain_input;
+        if self.ui_settings.retain_input != self.input_state.retain_input {
+            self.ui_settings.retain_input = self.input_state.retain_input;
+            self.spawn_save();
         }
     }
 
@@ -450,13 +503,31 @@ impl PatinaEguiApp {
         if content.is_empty() {
             return;
         }
+        match self.model_validation() {
+            ModelValidation::Ready => {}
+            ModelValidation::MissingModels => {
+                self.validation_error = Some(
+                    "No models are configured. Edit Settings to add models in patina.yaml.".into(),
+                );
+                return;
+            }
+            ModelValidation::InvalidSelection => {
+                self.validation_error = Some(
+                    "Selected model is not available. Pick a model from the list in patina.yaml."
+                        .into(),
+                );
+                return;
+            }
+        }
         let Some(state) = self.state.as_ref().cloned() else {
             return;
         };
         let payload = content.to_owned();
+        let model = self.ui_settings.model.clone();
+        let temperature = self.ui_settings.temperature;
         let tx = self.tx.clone();
         self.runtime.spawn(async move {
-            let result = state.send_user_message(payload).await;
+            let result = state.send_user_message(payload, model, temperature).await;
             if tx.send(result).is_err() {
                 warn!("UI dropped before send completion");
             }
@@ -476,38 +547,100 @@ impl PatinaEguiApp {
     }
 
     fn set_sidebar_visibility(&mut self, visible: bool) {
-        if self.settings.data().sidebar_visible != visible {
-            self.settings.data_mut().sidebar_visible = visible;
+        if self.ui_settings.sidebar_visible != visible {
+            self.ui_settings.sidebar_visible = visible;
+            self.spawn_save();
         }
     }
 
     fn update_last_conversation(&mut self, id: Uuid) {
-        self.settings.data_mut().last_conversation = Some(id);
+        self.ui_settings.last_conversation = Some(id);
+        self.spawn_save();
     }
 
     fn pin_chat(&mut self, id: Uuid) {
-        if !self.settings.data().pinned_chats.contains(&id) {
-            let list = &mut self.settings.data_mut().pinned_chats;
+        if !self.ui_settings.pinned_chats.contains(&id) {
+            let list = &mut self.ui_settings.pinned_chats;
             list.insert(0, id);
             self.refresh_pinned_cache();
+            self.spawn_save();
         }
     }
 
     fn unpin_chat(&mut self, id: Uuid) {
-        if self.settings.data().pinned_chats.contains(&id) {
-            let list = &mut self.settings.data_mut().pinned_chats;
+        if self.ui_settings.pinned_chats.contains(&id) {
+            let list = &mut self.ui_settings.pinned_chats;
             list.retain(|candidate| candidate != &id);
             self.refresh_pinned_cache();
+            self.spawn_save();
         }
     }
 
     fn refresh_pinned_cache(&mut self) {
-        self.pinned_lookup = self.settings.data().pinned_chats.iter().copied().collect();
+        self.pinned_lookup = self.ui_settings.pinned_chats.iter().copied().collect();
+    }
+
+    fn model_validation(&self) -> ModelValidation {
+        if self.provider_config.available_models.is_empty() {
+            return ModelValidation::MissingModels;
+        }
+        let selection = self.ui_settings.model.trim();
+        if selection.is_empty() {
+            return ModelValidation::InvalidSelection;
+        }
+        if self
+            .provider_config
+            .available_models
+            .iter()
+            .any(|model| model == selection)
+        {
+            ModelValidation::Ready
+        } else {
+            ModelValidation::InvalidSelection
+        }
+    }
+
+    fn spawn_save(&mut self) {
+        let scope = self.scope.clone();
+        let settings = self.ui_settings.clone();
+        if let Some(handle) = self.pending_save.take() {
+            handle.abort();
+        }
+        let runtime = self.runtime.clone();
+        self.pending_save = Some(runtime.spawn(async move {
+            if let Err(err) = config::save_ui_settings(&scope, &settings).await {
+                error!(error = ?err, "Failed to save UI settings");
+            }
+        }));
+    }
+
+    fn persist_now(&mut self) {
+        if let Some(handle) = self.pending_save.take() {
+            handle.abort();
+        }
+        let scope = self.scope.clone();
+        let settings = self.ui_settings.clone();
+        if let Err(err) = self
+            .runtime
+            .block_on(config::save_ui_settings(&scope, &settings))
+        {
+            error!(error = ?err, "Failed to save UI settings");
+        }
+    }
+
+    fn reload_provider_config(&mut self) {
+        let scope = self.scope.clone();
+        if let Some(handle) = self.pending_provider_reload.take() {
+            handle.abort();
+        }
+        let runtime = self.runtime.clone();
+        self.pending_provider_reload =
+            Some(runtime.spawn(async move { config::load_provider_config(&scope).await }));
     }
 
     fn activate_project(&mut self, project: ProjectHandle) {
         self.settings_panel.set_project(Some(&project));
-        let last_selected = self.settings.data().last_conversation;
+        let last_selected = self.ui_settings.last_conversation;
         let state = Arc::new(AppState::new(project.clone(), self.driver.clone()));
         if let Some(last) = last_selected {
             state.select_conversation(last);
@@ -523,13 +656,15 @@ impl PatinaEguiApp {
 
     fn remember_project(&mut self, project: &ProjectHandle) {
         let root = project.paths().root.to_string_lossy().to_string();
-        let data = self.settings.data_mut();
-        data.current_project = Some(root.clone());
-        data.recent_projects.retain(|entry| entry != &root);
-        data.recent_projects.insert(0, root);
-        if data.recent_projects.len() > 10 {
-            data.recent_projects.truncate(10);
+        self.ui_settings.current_project = Some(root.clone());
+        self.ui_settings
+            .recent_projects
+            .retain(|entry| entry != &root);
+        self.ui_settings.recent_projects.insert(0, root);
+        if self.ui_settings.recent_projects.len() > 10 {
+            self.ui_settings.recent_projects.truncate(10);
         }
+        self.spawn_save();
     }
 
     fn sync_last_conversation(&mut self) {
@@ -537,7 +672,8 @@ impl PatinaEguiApp {
             .state
             .as_ref()
             .and_then(|state| state.active_conversation().map(|c| c.id));
-        self.settings.data_mut().last_conversation = active;
+        self.ui_settings.last_conversation = active;
+        self.spawn_save();
     }
 
     fn prompt_new_project(&mut self) {
@@ -601,20 +737,10 @@ impl PatinaEguiApp {
     fn capture_window_size(&mut self, ctx: &egui::Context) {
         if let Some(rect) = ctx.input(|input| input.viewport().inner_rect) {
             let size = rect.size();
-            let stored = self.settings.data().window_size;
+            let stored = self.ui_settings.window_size;
             if (stored[0] - size.x).abs() > 1.0 || (stored[1] - size.y).abs() > 1.0 {
-                self.settings.data_mut().window_size = [size.x, size.y];
-            }
-        }
-    }
-
-    fn flush_settings_if_needed(&mut self) {
-        if self.settings.is_dirty() && self.last_settings_flush.elapsed() >= SETTINGS_FLUSH_INTERVAL
-        {
-            if let Err(err) = self.settings.persist() {
-                error!(error = ?err, "Failed to persist UI settings");
-            } else {
-                self.last_settings_flush = Instant::now();
+                self.ui_settings.window_size = [size.x, size.y];
+                self.spawn_save();
             }
         }
     }
@@ -622,6 +748,7 @@ impl PatinaEguiApp {
     fn render(&mut self, ctx: &egui::Context) {
         self.apply_theme(ctx);
         self.process_background_results();
+        self.poll_provider_config_reload();
         if !matches!(self.about_mode, Some(AboutMode::Manual { .. })) {
             self.handle_shortcuts(ctx);
         }
@@ -629,8 +756,8 @@ impl PatinaEguiApp {
         self.layout(ctx);
         self.show_settings_panel(ctx);
         self.draw_about_dialog(ctx);
+        self.show_validation_modal(ctx);
         self.capture_window_size(ctx);
-        self.flush_settings_if_needed();
         if let Some(title) = self.pending_title.take() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
@@ -728,14 +855,37 @@ impl PatinaEguiApp {
         }
     }
 
+    fn show_validation_modal(&mut self, ctx: &egui::Context) {
+        let Some(message) = self.validation_error.clone() else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Unable to send")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.add(egui::Label::new(RichText::new(message.clone())).wrap(true));
+                ui.add_space(12.0);
+                if ui.button("OK").clicked() {
+                    open = false;
+                }
+            });
+        if !open {
+            self.validation_error = None;
+        }
+    }
+
     fn show_settings_panel(&mut self, ctx: &egui::Context) {
         let response = self.settings_panel.show(ctx, &self.palette);
         if response.app_saved {
+            self.reload_provider_config();
             if let Some(theme) = response.theme_changed {
                 if self.menu_state.theme_mode != theme {
                     self.menu_state.theme_mode = theme;
-                    if self.settings.data().theme_mode != theme {
-                        self.settings.data_mut().theme_mode = theme;
+                    if self.ui_settings.theme_mode != theme {
+                        self.ui_settings.theme_mode = theme;
+                        self.spawn_save();
                     }
                     self.apply_theme(ctx);
                 }
@@ -755,154 +905,12 @@ impl eframe::App for PatinaEguiApp {
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        if let Err(err) = self.settings.persist() {
-            error!(error = ?err, "Failed to save settings during shutdown");
-        }
+        self.persist_now();
     }
 }
 
 pub fn render_ui(ctx: &egui::Context, app_state: &mut PatinaEguiApp) {
     app_state.render(ctx);
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiSettings {
-    #[serde(default)]
-    pub theme_mode: ThemeMode,
-    #[serde(default = "UiSettings::default_sidebar_width")]
-    pub sidebar_width: f32,
-    #[serde(default = "UiSettings::default_sidebar_visible")]
-    pub sidebar_visible: bool,
-    #[serde(default = "UiSettings::default_window_size")]
-    pub window_size: [f32; 2],
-    #[serde(default)]
-    pub pinned_chats: Vec<Uuid>,
-    #[serde(default)]
-    pub last_conversation: Option<Uuid>,
-    #[serde(default = "UiSettings::default_model")]
-    pub model: String,
-    #[serde(default = "UiSettings::default_temperature")]
-    pub temperature: f32,
-    #[serde(default = "UiSettings::default_retain_input")]
-    pub retain_input: bool,
-    #[serde(default)]
-    pub recent_projects: Vec<String>,
-    #[serde(default)]
-    pub current_project: Option<String>,
-}
-
-impl Default for UiSettings {
-    fn default() -> Self {
-        Self {
-            theme_mode: ThemeMode::System,
-            sidebar_width: Self::default_sidebar_width(),
-            sidebar_visible: true,
-            window_size: Self::default_window_size(),
-            pinned_chats: Vec::new(),
-            last_conversation: None,
-            model: Self::default_model(),
-            temperature: Self::default_temperature(),
-            retain_input: true,
-            recent_projects: Vec::new(),
-            current_project: None,
-        }
-    }
-}
-
-impl UiSettings {
-    fn default_sidebar_width() -> f32 {
-        280.0
-    }
-
-    fn default_sidebar_visible() -> bool {
-        true
-    }
-
-    fn default_window_size() -> [f32; 2] {
-        [1280.0, 820.0]
-    }
-
-    fn default_model() -> String {
-        "gpt-4o".to_string()
-    }
-
-    fn default_temperature() -> f32 {
-        0.6
-    }
-
-    fn default_retain_input() -> bool {
-        true
-    }
-}
-
-pub struct UiSettingsStore {
-    path: PathBuf,
-    data: UiSettings,
-    dirty: bool,
-}
-
-impl UiSettingsStore {
-    pub fn load() -> Self {
-        let path = Self::default_path();
-        let data = Self::read_from_disk(&path).unwrap_or_default();
-        Self {
-            path,
-            data,
-            dirty: false,
-        }
-    }
-
-    pub fn from_path(path: PathBuf) -> Self {
-        let data = Self::read_from_disk(&path).unwrap_or_default();
-        Self {
-            path,
-            data,
-            dirty: false,
-        }
-    }
-
-    pub fn temporary() -> Self {
-        let mut path = std::env::temp_dir();
-        path.push(format!("patina-ui-{}.json", Uuid::new_v4()));
-        Self::from_path(path)
-    }
-
-    pub fn data(&self) -> &UiSettings {
-        &self.data
-    }
-
-    pub fn data_mut(&mut self) -> &mut UiSettings {
-        self.dirty = true;
-        &mut self.data
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        self.dirty
-    }
-
-    pub fn persist(&mut self) -> Result<()> {
-        if !self.dirty {
-            return Ok(());
-        }
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let serialized = serde_json::to_string_pretty(&self.data)?;
-        fs::write(&self.path, serialized)?;
-        self.dirty = false;
-        Ok(())
-    }
-
-    fn read_from_disk(path: &Path) -> Option<UiSettings> {
-        let contents = fs::read_to_string(path).ok()?;
-        serde_json::from_str(&contents).ok()
-    }
-
-    fn default_path() -> PathBuf {
-        ProjectDirs::from("com", "Patina", "Patina")
-            .map(|dirs| dirs.config_dir().join("ui_settings.json"))
-            .unwrap_or_else(|| PathBuf::from("ui_settings.json"))
-    }
 }
 
 fn default_mcp_entries() -> Vec<McpSidebarEntry> {

@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
+    #[default]
     System,
     Light,
     Dark,
@@ -30,12 +31,6 @@ impl ThemeMode {
             ThemeMode::Light => eframe::Theme::Light,
             ThemeMode::System | ThemeMode::Dark => eframe::Theme::Dark,
         }
-    }
-}
-
-impl Default for ThemeMode {
-    fn default() -> Self {
-        ThemeMode::System
     }
 }
 
@@ -298,6 +293,7 @@ pub struct SidebarOutput {
 pub struct Sidebar;
 
 impl Sidebar {
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         ui: &mut egui::Ui,
         state: &mut SidebarState,
@@ -423,6 +419,7 @@ impl Sidebar {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn chats_section(
         ui: &mut egui::Ui,
         state: &mut SidebarState,
@@ -928,6 +925,8 @@ impl InputBar {
         ui: &mut egui::Ui,
         state: &mut InputBarState,
         palette: &ThemePalette,
+        available_models: &[String],
+        selection_valid: bool,
     ) -> InputBarOutput {
         let mut output = InputBarOutput::default();
         Frame::none()
@@ -959,21 +958,40 @@ impl InputBar {
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_source("model_selector")
-                        .selected_text(&state.selected_model)
-                        .show_ui(ui, |ui| {
-                            for model in ["gpt-4o", "gpt-4.5-turbo", "custom"] {
-                                if ui
-                                    .selectable_label(state.selected_model == model, model)
-                                    .clicked()
-                                {
-                                    if state.selected_model != model {
-                                        state.selected_model = model.to_string();
-                                        output.model_changed = Some(model.to_string());
+                    ui.vertical(|ui| {
+                        let display_text = if state.selected_model.is_empty() {
+                            "Select model"
+                        } else {
+                            state.selected_model.as_str()
+                        };
+                        egui::ComboBox::from_id_source("model_selector")
+                            .selected_text(display_text)
+                            .show_ui(ui, |ui| {
+                                for model in available_models {
+                                    if ui
+                                        .selectable_label(state.selected_model == *model, model)
+                                        .clicked()
+                                        && state.selected_model != *model
+                                    {
+                                        state.selected_model = model.clone();
+                                        output.model_changed = Some(model.clone());
                                     }
                                 }
-                            }
-                        });
+                            });
+                        if available_models.is_empty() {
+                            ui.label(
+                                RichText::new("No models configured")
+                                    .color(palette.warning)
+                                    .small(),
+                            );
+                        } else if !selection_valid {
+                            ui.label(
+                                RichText::new("Model not in patina.yaml")
+                                    .color(palette.warning)
+                                    .small(),
+                            );
+                        }
+                    });
                     let slider =
                         egui::Slider::new(&mut state.temperature, 0.0..=2.0).text("Temperature");
                     if ui.add(slider).drag_released() {

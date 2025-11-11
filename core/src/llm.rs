@@ -21,11 +21,16 @@ pub enum LlmProviderKind {
 pub struct LlmConfig {
     pub provider: LlmProviderKind,
     pub model: Option<String>,
+    pub temperature: Option<f32>,
 }
 
 impl LlmConfig {
     pub fn new(provider: LlmProviderKind, model: Option<String>) -> Self {
-        Self { provider, model }
+        Self {
+            provider,
+            model,
+            temperature: None,
+        }
     }
 }
 
@@ -122,16 +127,28 @@ impl LlmDriver {
     }
 
     pub fn provider_kind(&self) -> Option<LlmProviderKind> {
-        self.config.as_ref().map(|cfg| cfg.provider.clone())
+        self.config.as_ref().map(|cfg| cfg.provider)
     }
 
     pub fn status(&self) -> LlmStatus {
         self.status.clone()
     }
 
-    pub async fn respond(&self, history: &[ChatMessage]) -> Result<ChatResponse> {
+    pub async fn respond(
+        &self,
+        history: &[ChatMessage],
+        model_override: Option<&str>,
+        temperature: Option<f32>,
+    ) -> Result<ChatResponse> {
         match (&self.provider, &self.config) {
-            (Some(provider), Some(config)) => provider.send_chat(history, config).await,
+            (Some(provider), Some(config)) => {
+                let mut effective = config.clone();
+                if let Some(model) = model_override {
+                    effective.model = Some(model.to_string());
+                }
+                effective.temperature = temperature;
+                provider.send_chat(history, &effective).await
+            }
             _ => {
                 let message = match &self.status {
                     LlmStatus::Ready => "AI driver not initialized".to_string(),
@@ -161,7 +178,7 @@ impl LlmDriver {
     fn configured_mock(model: Option<String>) -> Self {
         Self::ready(
             LlmConfig::new(LlmProviderKind::Mock, model),
-            Arc::new(MockProvider::default()),
+            Arc::new(MockProvider),
         )
     }
 }
@@ -258,7 +275,11 @@ impl LanguageModelProvider for OpenAiChatProvider {
         config: &LlmConfig,
     ) -> Result<ChatResponse> {
         let payload = ChatCompletionRequest {
-            model: self.backend.request_model().map(|model| model.to_string()),
+            model: config
+                .model
+                .clone()
+                .or_else(|| self.backend.request_model().map(|model| model.to_string())),
+            temperature: config.temperature,
             messages: map_messages(messages),
         };
         let response = self
@@ -296,6 +317,8 @@ impl LanguageModelProvider for MockProvider {
 struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
     messages: Vec<CompletionRequestMessage>,
 }
 
@@ -392,8 +415,9 @@ async fn synthetic_response(
         .map(|msg| msg.content.clone())
         .unwrap_or_else(|| "How can I help you today?".to_string());
     let reply = format!(
-        "[{provider_name}] Model {:?}: received '{}'.",
+        "[{provider_name}] Model {:?} (temp {:?}): received '{}'.",
         config.model.as_deref().unwrap_or("default"),
+        config.temperature,
         prompt
     );
     let message = ChatMessage {

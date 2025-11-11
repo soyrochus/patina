@@ -350,46 +350,41 @@ impl PatinaClientHandler {
 }
 
 impl service::Service<RoleClient> for PatinaClientHandler {
-    fn handle_request(
+    async fn handle_request(
         &self,
         request: ServerRequest,
         _context: service::RequestContext<RoleClient>,
-    ) -> impl std::future::Future<Output = Result<rmcp::model::ClientResult, ErrorData>> + Send
-    {
-        async move {
-            match request {
-                ServerRequest::PingRequest(_) => Ok(rmcp::model::ClientResult::empty(())),
-                ServerRequest::ListRootsRequest(_) => Ok(
-                    rmcp::model::ClientResult::ListRootsResult(ListRootsResult::default()),
-                ),
-                ServerRequest::CreateMessageRequest(_) => {
-                    Err(ErrorData::method_not_found::<CreateMessageRequestMethod>())
-                }
-                ServerRequest::CreateElicitationRequest(_) => {
-                    Err(ErrorData::method_not_found::<ElicitationCreateRequestMethod>())
-                }
+    ) -> Result<rmcp::model::ClientResult, ErrorData> {
+        match request {
+            ServerRequest::PingRequest(_) => Ok(rmcp::model::ClientResult::empty(())),
+            ServerRequest::ListRootsRequest(_) => Ok(rmcp::model::ClientResult::ListRootsResult(
+                ListRootsResult::default(),
+            )),
+            ServerRequest::CreateMessageRequest(_) => {
+                Err(ErrorData::method_not_found::<CreateMessageRequestMethod>())
+            }
+            ServerRequest::CreateElicitationRequest(_) => {
+                Err(ErrorData::method_not_found::<ElicitationCreateRequestMethod>())
             }
         }
     }
 
-    fn handle_notification(
+    async fn handle_notification(
         &self,
         notification: ServerNotification,
         _context: service::NotificationContext<RoleClient>,
-    ) -> impl std::future::Future<Output = Result<(), ErrorData>> + Send {
-        async move {
-            match notification {
-                ServerNotification::LoggingMessageNotification(msg) => {
-                    warn!(target = "mcp.logging", endpoint = %self.endpoint_id, ?msg, "Server log message");
-                }
-                ServerNotification::ProgressNotification(_) => {}
-                ServerNotification::CancelledNotification(_) => {}
-                other => {
-                    warn!(target = "mcp.notification", endpoint = %self.endpoint_id, ?other, "Unhandled server notification");
-                }
+    ) -> Result<(), ErrorData> {
+        match notification {
+            ServerNotification::LoggingMessageNotification(msg) => {
+                warn!(target = "mcp.logging", endpoint = %self.endpoint_id, ?msg, "Server log message");
             }
-            Ok(())
+            ServerNotification::ProgressNotification(_) => {}
+            ServerNotification::CancelledNotification(_) => {}
+            other => {
+                warn!(target = "mcp.notification", endpoint = %self.endpoint_id, ?other, "Unhandled server notification");
+            }
         }
+        Ok(())
     }
 
     fn get_info(&self) -> ClientInfo {

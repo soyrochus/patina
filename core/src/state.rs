@@ -118,6 +118,12 @@ impl Conversation {
     }
 }
 
+impl Default for Conversation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationSummary {
     pub id: Uuid,
@@ -204,11 +210,17 @@ impl AppState {
         id
     }
 
-    pub async fn send_user_message(&self, content: impl Into<String>) -> Result<()> {
+    pub async fn send_user_message(
+        &self,
+        content: impl Into<String>,
+        model: impl Into<String>,
+        temperature: f32,
+    ) -> Result<()> {
         let content = content.into();
         if content.trim().is_empty() {
             return Ok(());
         }
+        let model = model.into();
 
         let message = ChatMessage::new(MessageRole::User, content.clone());
         let conversation_id = {
@@ -223,7 +235,10 @@ impl AppState {
         };
 
         let history = self.conversation_history(conversation_id);
-        let response = self.llm.respond(&history).await?;
+        let response = self
+            .llm
+            .respond(&history, Some(model.as_str()), Some(temperature))
+            .await?;
         let assistant_message = response.message;
         {
             let mut inner = self.inner.write();
@@ -269,18 +284,15 @@ impl AppState {
         let mut inner = self.inner.write();
         let from_idx = inner.conversations.iter().position(|c| c.id == dragged);
         let to_idx = inner.conversations.iter().position(|c| c.id == target);
-        match (from_idx, to_idx) {
-            (Some(from), Some(mut to)) => {
-                if from == to {
-                    return Ok(());
-                }
-                let conversation = inner.conversations.remove(from);
-                if from < to {
-                    to -= 1;
-                }
-                inner.conversations.insert(to, conversation);
+        if let (Some(from), Some(mut to)) = (from_idx, to_idx) {
+            if from == to {
+                return Ok(());
             }
-            _ => {}
+            let conversation = inner.conversations.remove(from);
+            if from < to {
+                to -= 1;
+            }
+            inner.conversations.insert(to, conversation);
         }
         Ok(())
     }
@@ -295,7 +307,7 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    fn ensure_conversation<'a>(inner: &'a mut InnerState) -> &'a mut Conversation {
+    fn ensure_conversation(inner: &mut InnerState) -> &mut Conversation {
         if let Some(id) = inner.current_session {
             if let Some(position) = inner.conversations.iter().position(|c| c.id == id) {
                 return &mut inner.conversations[position];

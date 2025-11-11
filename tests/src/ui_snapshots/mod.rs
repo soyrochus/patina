@@ -1,6 +1,9 @@
 use egui::{self, RawInput};
 use patina::ui::ThemeMode;
-use patina::{render_ui, PatinaEguiApp, UiSettingsStore};
+use patina::{
+    config::{ProviderConfig, Scope, UiSettings},
+    render_ui, PatinaEguiApp,
+};
 use patina_core::{llm::LlmDriver, project::ProjectHandle, state::AppState};
 use std::fs;
 use std::path::PathBuf;
@@ -25,12 +28,22 @@ fn build_app(theme: ThemeMode) -> PatinaEguiApp {
         let seeded_driver = driver.clone();
         let state = AppState::with_store(project.clone(), store, seeded_driver);
         runtime
-            .block_on(state.send_user_message("Seed snapshot conversation"))
+            .block_on(state.send_user_message("Seed snapshot conversation", "mock", 0.6))
             .expect("seed message");
     }
-    let mut settings = UiSettingsStore::temporary();
-    settings.data_mut().theme_mode = theme;
-    PatinaEguiApp::new(Some(project), driver, runtime, settings)
+    let mut settings = UiSettings::default();
+    settings.theme_mode = theme;
+    let provider_config = ProviderConfig {
+        available_models: vec!["gpt-4o".to_string()],
+    };
+    PatinaEguiApp::new(
+        Some(project),
+        driver,
+        runtime,
+        Scope::User,
+        settings,
+        provider_config,
+    )
 }
 
 fn capture_snapshot(app: &mut PatinaEguiApp) -> String {

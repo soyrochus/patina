@@ -21,7 +21,7 @@ fn app_state_records_messages() {
     let state = Arc::new(AppState::with_store(project, store, driver));
 
     runtime
-        .block_on(state.send_user_message("hello world"))
+        .block_on(state.send_user_message("hello world", "mock", 0.6))
         .expect("send message");
 
     let conversation = state.active_conversation().expect("conversation");

@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 use eframe::egui;
-use patina::{logo_png_bytes, PatinaEguiApp, UiSettingsStore};
+use patina::{
+    config::{load_provider_config, load_ui_settings, Scope, UiSettings},
+    logo_png_bytes, PatinaEguiApp,
+};
 use patina_core::llm::LlmDriver;
 use patina_core::project::ProjectHandle;
 use patina_core::telemetry;
@@ -67,11 +70,15 @@ fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(Runtime::new()?);
     let driver = runtime.block_on(LlmDriver::from_environment());
 
-    let mut settings_store = UiSettingsStore::load();
-    let project = resolve_project(&cli, &mut settings_store)?;
+    let scope = Scope::User;
+    let mut ui_settings = runtime.block_on(load_ui_settings(&scope))?;
+    let provider_config = runtime.block_on(load_provider_config(&scope))?;
+    let project = resolve_project(&cli, &mut ui_settings)?;
     let runtime_for_ui = runtime.clone();
-    let mut settings = Some(settings_store);
-    let initial_size = settings.as_ref().unwrap().data().window_size;
+    let mut settings = Some(ui_settings);
+    let mut provider = Some(provider_config);
+    let scope_for_ui = scope.clone();
+    let initial_size = settings.as_ref().unwrap().window_size;
     let inner_size = egui::vec2(initial_size[0].max(1024.0), initial_size[1].max(720.0));
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size(inner_size)
@@ -82,12 +89,7 @@ fn main() -> anyhow::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport,
         follow_system_theme: true,
-        default_theme: settings
-            .as_ref()
-            .unwrap()
-            .data()
-            .theme_mode
-            .fallback_theme(),
+        default_theme: settings.as_ref().unwrap().theme_mode.fallback_theme(),
         ..Default::default()
     };
 
@@ -100,12 +102,15 @@ fn main() -> anyhow::Result<()> {
         &window_title,
         native_options,
         Box::new(move |_cc| {
-            let settings_store = settings.take().expect("UI settings already consumed");
+            let ui_settings = settings.take().expect("UI settings already consumed");
+            let provider_config = provider.take().expect("provider config already consumed");
             Box::new(PatinaEguiApp::new(
                 project.clone(),
                 driver.clone(),
                 runtime_for_ui.clone(),
-                settings_store,
+                scope_for_ui.clone(),
+                ui_settings,
+                provider_config,
             ))
         }),
     )
@@ -114,10 +119,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn resolve_project(
-    cli: &Cli,
-    settings: &mut UiSettingsStore,
-) -> anyhow::Result<Option<ProjectHandle>> {
+fn resolve_project(cli: &Cli, settings: &mut UiSettings) -> anyhow::Result<Option<ProjectHandle>> {
     if let Some(new_path) = &cli.new {
         let name = cli
             .name
@@ -131,15 +133,12 @@ fn resolve_project(
         return ProjectHandle::open(path).map(Some);
     }
 
-    if let Some(stored) = settings.data().current_project.clone() {
+    if let Some(stored) = settings.current_project.clone() {
         match ProjectHandle::open(Path::new(&stored)) {
             Ok(handle) => return Ok(Some(handle)),
             Err(_) => {
-                settings.data_mut().current_project = None;
-                settings
-                    .data_mut()
-                    .recent_projects
-                    .retain(|entry| entry != &stored);
+                settings.current_project = None;
+                settings.recent_projects.retain(|entry| entry != &stored);
             }
         }
     }

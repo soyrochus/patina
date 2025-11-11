@@ -48,7 +48,7 @@ fn normalized_models(list: Vec<String>) -> Vec<String> {
 fn parse_models_input(input: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut seen = HashSet::new();
-    for segment in input.split(|c| c == ',' || c == ';') {
+    for segment in input.split([',', ';']) {
         let trimmed = segment.trim();
         if trimmed.is_empty() {
             continue;
@@ -545,27 +545,41 @@ fn global_config_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
         if let Some(base) = BaseDirs::new() {
-            return base.config_dir().join("patina").join("patina.yml");
+            let dir = base.config_dir().join("patina");
+            return select_config_path(dir);
         }
     }
     #[cfg(target_os = "macos")]
     {
         if let Some(base) = BaseDirs::new() {
-            return base
+            let dir = base
                 .home_dir()
                 .join("Library")
                 .join("Application Support")
-                .join("Patina")
-                .join("patina.yml");
+                .join("Patina");
+            return select_config_path(dir);
         }
     }
     #[cfg(target_os = "windows")]
     {
         if let Some(base) = BaseDirs::new() {
-            return base.config_dir().join("Patina").join("patina.yml");
+            let dir = base.config_dir().join("Patina");
+            return select_config_path(dir);
         }
     }
-    PathBuf::from("patina.yml")
+    select_config_path(PathBuf::from("."))
+}
+
+fn select_config_path(dir: PathBuf) -> PathBuf {
+    let yaml = dir.join("patina.yaml");
+    if yaml.exists() {
+        return yaml;
+    }
+    let yml = dir.join("patina.yml");
+    if yml.exists() {
+        return yml;
+    }
+    yaml
 }
 
 struct Feedback {
@@ -596,20 +610,11 @@ impl Feedback {
     }
 }
 
+#[derive(Default)]
 pub struct SettingsResponse {
     pub app_saved: bool,
     pub project_saved: bool,
     pub theme_changed: Option<ThemeMode>,
-}
-
-impl Default for SettingsResponse {
-    fn default() -> Self {
-        Self {
-            app_saved: false,
-            project_saved: false,
-            theme_changed: None,
-        }
-    }
 }
 
 pub struct SettingsPanel {
@@ -1018,6 +1023,12 @@ impl SettingsPanel {
             store.persist()?;
         }
         Ok(())
+    }
+}
+
+impl Default for SettingsPanel {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

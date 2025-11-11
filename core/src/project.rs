@@ -224,18 +224,16 @@ impl ProjectHandle {
             let name = file.mangled_name();
             let mut components = name.components();
             let first_component = components.next();
-            if let Some(component) = first_component {
-                if let Component::Normal(value) = component {
-                    let candidate = PathBuf::from(value);
-                    match &root_component {
-                        Some(existing) if existing != &candidate => {
-                            return Err(anyhow!("archive contains multiple root directories"));
-                        }
-                        None => {
-                            root_component = Some(candidate);
-                        }
-                        _ => {}
+            if let Some(Component::Normal(value)) = first_component {
+                let candidate = PathBuf::from(value);
+                match &root_component {
+                    Some(existing) if existing != &candidate => {
+                        return Err(anyhow!("archive contains multiple root directories"));
                     }
+                    None => {
+                        root_component = Some(candidate);
+                    }
+                    _ => {}
                 }
             }
 
