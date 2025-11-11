@@ -230,6 +230,10 @@ Hosts unit, integration, and end-to-end tests. The initial suite validates conve
 
 Provides automation entry points. `cargo run -p xtask -- smoke` spins up the core logic with the mock LLM driver and logs the resulting conversation metadata, suitable for CI smoke checks.
 
+## Documentation
+
+High-level and contributor-oriented documentation lives in [`docs/README.md`](docs/README.md). It explains the overall architecture, coding expectations, and how the reference material inside `docs/` is organized so you can navigate deeper without this file needing constant updates.
+
 ## Contributing
 
 1. Fork and clone the repository.
