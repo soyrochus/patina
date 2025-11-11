@@ -1,4 +1,4 @@
-use crate::llm::{LlmDriver, LlmStatus};
+use crate::llm::{LlmDriver, LlmStatus, StreamChunk};
 use crate::project::ProjectHandle;
 use crate::store::TranscriptStore;
 use anyhow::Result;
@@ -7,6 +7,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -256,6 +257,104 @@ impl AppState {
             }
         }
         Ok(())
+    }
+
+    pub async fn send_user_message_streaming(
+        &self,
+        content: impl Into<String>,
+        model: impl Into<String>,
+        temperature: f32,
+    ) -> Result<(Uuid, mpsc::UnboundedReceiver<Result<StreamChunk>>)> {
+        let content = content.into();
+        if content.trim().is_empty() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let _ = tx.send(Ok(StreamChunk {
+                delta: String::new(),
+                done: true,
+            }));
+            return Ok((Uuid::new_v4(), rx));
+        }
+        let model = model.into();
+
+        let message = ChatMessage::new(MessageRole::User, content.clone());
+        let conversation_id = {
+            let mut inner = self.inner.write();
+            let conversation = Self::ensure_conversation(&mut inner);
+            let title_changed = conversation.add_message(message.clone());
+            self.store.append_message(conversation.id, &message)?;
+            if title_changed {
+                self.store.persist_metadata(conversation)?;
+            }
+            conversation.id
+        };
+
+        let history = self.conversation_history(conversation_id);
+        let stream_rx = self
+            .llm
+            .respond_streaming(&history, Some(model.as_str()), Some(temperature))
+            .await?;
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let assistant_id = Uuid::new_v4();
+        let store = self.store.clone();
+        let inner = self.inner.clone();
+
+        tokio::spawn(async move {
+            let mut accumulated_content = String::new();
+            let mut stream = stream_rx;
+
+            while let Some(result) = stream.recv().await {
+                match result {
+                    Ok(chunk) => {
+                        if chunk.done {
+                            // Save complete assistant message
+                            let assistant_message = ChatMessage {
+                                id: assistant_id,
+                                role: MessageRole::Assistant,
+                                content: accumulated_content.clone(),
+                                created_at: Utc::now(),
+                                tool_calls: Vec::new(),
+                            };
+
+                            let mut inner_guard = inner.write();
+                            if let Some(conversation) = inner_guard
+                                .conversations
+                                .iter_mut()
+                                .find(|c| c.id == conversation_id)
+                            {
+                                let title_changed =
+                                    conversation.add_message(assistant_message.clone());
+                                if let Err(err) =
+                                    store.append_message(conversation.id, &assistant_message)
+                                {
+                                    tracing::error!(%err, "failed to persist assistant message");
+                                }
+                                if title_changed {
+                                    if let Err(err) = store.persist_metadata(conversation) {
+                                        tracing::error!(%err, "failed to persist metadata");
+                                    }
+                                }
+                            }
+
+                            let _ = tx.send(Ok(StreamChunk {
+                                delta: String::new(),
+                                done: true,
+                            }));
+                            break;
+                        } else {
+                            accumulated_content.push_str(&chunk.delta);
+                            let _ = tx.send(Ok(chunk));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok((assistant_id, rx))
     }
 
     pub fn rename_conversation(&self, id: Uuid, title: impl Into<String>) -> Result<()> {

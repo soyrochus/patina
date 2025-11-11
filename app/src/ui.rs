@@ -686,6 +686,7 @@ impl ChatPanel {
         palette: &ThemePalette,
         state: &mut ChatPanelState,
         conversation: &Conversation,
+        streaming_message: Option<&crate::app::StreamingMessage>,
         markdown_cache: &mut CommonMarkCache,
     ) -> ChatPanelOutput {
         let mut output = ChatPanelOutput::default();
@@ -700,6 +701,12 @@ impl ChatPanel {
             .show(ui, |ui| {
                 for message in messages {
                     Self::chat_bubble(ui, palette, markdown_cache, message);
+                    ui.add_space(8.0);
+                }
+                
+                // Display streaming message if present
+                if let Some(streaming) = streaming_message {
+                    Self::streaming_bubble(ui, palette, markdown_cache, &streaming.content);
                     ui.add_space(8.0);
                 }
             });
@@ -805,6 +812,52 @@ impl ChatPanel {
             if trailing_pad > 0.0 {
                 ui.add_space(trailing_pad);
             }
+        });
+    }
+
+    fn streaming_bubble(
+        ui: &mut egui::Ui,
+        palette: &ThemePalette,
+        markdown_cache: &mut CommonMarkCache,
+        content: &str,
+    ) {
+        let bubble_color = palette.assistant_bubble;
+        let total_width = ui.available_width().max(0.0);
+
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(total_width, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(total_width);
+                    Frame::none()
+                        .fill(bubble_color)
+                        .stroke(egui::Stroke::new(1.0, palette.border))
+                        .rounding(egui::Rounding::same(10.0))
+                        .inner_margin(Margin::symmetric(12.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Patina").strong());
+                                ui.label(
+                                    RichText::new("streaming...")
+                                        .color(palette.text_secondary)
+                                        .small()
+                                        .italics(),
+                                );
+                            });
+                            
+                            if !content.is_empty() {
+                                CommonMarkViewer::new("streaming_msg").show(
+                                    ui,
+                                    markdown_cache,
+                                    content,
+                                );
+                            } else {
+                                ui.spinner();
+                            }
+                        });
+                },
+            );
         });
     }
 }

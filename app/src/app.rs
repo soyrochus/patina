@@ -18,7 +18,7 @@ use egui::{self, Margin, RichText, Stroke, TextureOptions};
 use egui_commonmark::CommonMarkCache;
 use patina_core::project::ProjectHandle;
 use patina_core::state::AppState;
-use patina_core::{llm::LlmDriver, LlmStatus};
+use patina_core::{llm::LlmDriver, LlmStatus, StreamChunk};
 use rfd::FileDialog;
 use std::collections::HashSet;
 use std::env;
@@ -44,6 +44,13 @@ enum ModelValidation {
     Ready,
     MissingModels,
     InvalidSelection,
+}
+
+#[derive(Clone)]
+pub struct StreamingMessage {
+    pub conversation_id: Uuid,
+    pub message_id: Uuid,
+    pub content: String,
 }
 
 pub struct PatinaEguiApp {
@@ -74,6 +81,8 @@ pub struct PatinaEguiApp {
     pending_save: Option<tokio::task::JoinHandle<()>>,
     pending_provider_reload: Option<tokio::task::JoinHandle<Result<ProviderConfig>>>,
     validation_error: Option<String>,
+    streaming_message: Option<StreamingMessage>,
+    stream_rx: Option<UnboundedReceiver<Result<StreamChunk>>>,
 }
 
 impl PatinaEguiApp {
@@ -134,6 +143,8 @@ impl PatinaEguiApp {
             pending_save: None,
             pending_provider_reload: None,
             validation_error: None,
+            streaming_message: None,
+            stream_rx: None,
         };
         app.refresh_pinned_cache();
         if let Some(project) = project {
@@ -158,6 +169,32 @@ impl PatinaEguiApp {
                 self.error = Some(err.to_string());
             } else {
                 self.error = None;
+            }
+        }
+    }
+
+    fn process_stream_chunks(&mut self) {
+        if let Some(rx) = &mut self.stream_rx {
+            while let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(chunk) => {
+                        if chunk.done {
+                            // Streaming complete, clear streaming state
+                            self.streaming_message = None;
+                            self.stream_rx = None;
+                            break;
+                        } else if let Some(streaming) = &mut self.streaming_message {
+                            streaming.content.push_str(&chunk.delta);
+                        }
+                    }
+                    Err(err) => {
+                        error!(error = ?err, "Stream error");
+                        self.error = Some(format!("Stream error: {err}"));
+                        self.streaming_message = None;
+                        self.stream_rx = None;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -359,11 +396,16 @@ impl PatinaEguiApp {
                 )
                 .show(ctx, |ui| {
                     if let Some(conversation) = active_conversation.as_ref() {
+                        let streaming = self
+                            .streaming_message
+                            .as_ref()
+                            .filter(|s| s.conversation_id == conversation.id);
                         let chat_output = ChatPanel::show(
                             ui,
                             &self.palette,
                             &mut self.chat_panel_state,
                             conversation,
+                            streaming,
                             &mut self.markdown_cache,
                         );
                         if chat_output.load_older {
@@ -522,15 +564,47 @@ impl PatinaEguiApp {
         let Some(state) = self.state.as_ref().cloned() else {
             return;
         };
+
         let payload = content.to_owned();
         let model = self.ui_settings.model.clone();
         let temperature = self.ui_settings.temperature;
+
+        // Get current or start new conversation
+        let conversation_id = state
+            .active_conversation()
+            .map(|c| c.id)
+            .unwrap_or_else(|| state.start_new_conversation());
+
+        let (stream_tx, stream_rx) = unbounded_channel();
+        self.stream_rx = Some(stream_rx);
+
         let tx = self.tx.clone();
         self.runtime.spawn(async move {
-            let result = state.send_user_message(payload, model, temperature).await;
-            if tx.send(result).is_err() {
-                warn!("UI dropped before send completion");
+            match state
+                .send_user_message_streaming(payload, model, temperature)
+                .await
+            {
+                Ok((_message_id, mut llm_stream)) => {
+                    // Forward stream chunks from LLM to UI
+                    while let Some(chunk) = llm_stream.recv().await {
+                        if stream_tx.send(chunk).is_err() {
+                            warn!("UI dropped stream receiver");
+                            break;
+                        }
+                    }
+                    let _ = tx.send(Ok(()));
+                }
+                Err(err) => {
+                    let _ = tx.send(Err(err));
+                }
             }
+        });
+
+        // Initialize streaming message for UI display
+        self.streaming_message = Some(StreamingMessage {
+            conversation_id,
+            message_id: Uuid::new_v4(),
+            content: String::new(),
         });
     }
 
@@ -748,6 +822,7 @@ impl PatinaEguiApp {
     fn render(&mut self, ctx: &egui::Context) {
         self.apply_theme(ctx);
         self.process_background_results();
+        self.process_stream_chunks();
         self.poll_provider_config_reload();
         if !matches!(self.about_mode, Some(AboutMode::Manual { .. })) {
             self.handle_shortcuts(ctx);

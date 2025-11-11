@@ -3,9 +3,11 @@ use crate::state::{ChatMessage, MessageRole};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -52,10 +54,22 @@ pub enum LlmStatus {
     Unconfigured(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct StreamChunk {
+    pub delta: String,
+    pub done: bool,
+}
+
 #[async_trait]
 pub trait LanguageModelProvider: Send + Sync {
     async fn send_chat(&self, messages: &[ChatMessage], config: &LlmConfig)
         -> Result<ChatResponse>;
+    
+    async fn send_chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        config: &LlmConfig,
+    ) -> Result<mpsc::UnboundedReceiver<Result<StreamChunk>>>;
 }
 
 #[derive(Clone)]
@@ -148,6 +162,31 @@ impl LlmDriver {
                 }
                 effective.temperature = temperature;
                 provider.send_chat(history, &effective).await
+            }
+            _ => {
+                let message = match &self.status {
+                    LlmStatus::Ready => "AI driver not initialized".to_string(),
+                    LlmStatus::Unconfigured(msg) => msg.clone(),
+                };
+                bail!(message);
+            }
+        }
+    }
+
+    pub async fn respond_streaming(
+        &self,
+        history: &[ChatMessage],
+        model_override: Option<&str>,
+        temperature: Option<f32>,
+    ) -> Result<mpsc::UnboundedReceiver<Result<StreamChunk>>> {
+        match (&self.provider, &self.config) {
+            (Some(provider), Some(config)) => {
+                let mut effective = config.clone();
+                if let Some(model) = model_override {
+                    effective.model = Some(model.to_string());
+                }
+                effective.temperature = temperature;
+                provider.send_chat_stream(history, &effective).await
             }
             _ => {
                 let message = match &self.status {
@@ -297,6 +336,109 @@ impl LanguageModelProvider for OpenAiChatProvider {
             .with_context(|| format!("{} response decoding failed", self.backend.label()))?;
         completion_to_chat(payload, config)
     }
+
+    async fn send_chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        config: &LlmConfig,
+    ) -> Result<mpsc::UnboundedReceiver<Result<StreamChunk>>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let payload = ChatCompletionStreamRequest {
+            model: config
+                .model
+                .clone()
+                .or_else(|| self.backend.request_model().map(|model| model.to_string())),
+            temperature: config.temperature,
+            messages: map_messages(messages),
+            stream: true,
+        };
+
+        let response = self
+            .backend
+            .request_builder(&self.client)
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("{} streaming request failed", self.backend.label()))?
+            .error_for_status()
+            .with_context(|| format!("{} returned an error status", self.backend.label()))?;
+
+        let backend_label = self.backend.label();
+        tokio::spawn(async move {
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(bytes) => {
+                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                        // Process complete lines from buffer
+                        while let Some(line_end) = buffer.find('\n') {
+                            let line = buffer[..line_end].trim().to_string();
+                            buffer = buffer[line_end + 1..].to_string();
+
+                            if line.is_empty() {
+                                continue;
+                            }
+
+                            if let Some(json_str) = line.strip_prefix("data: ") {
+                                if json_str == "[DONE]" {
+                                    let _ = tx.send(Ok(StreamChunk {
+                                        delta: String::new(),
+                                        done: true,
+                                    }));
+                                    return;
+                                }
+
+                                match serde_json::from_str::<ChatCompletionStreamResponse>(json_str)
+                                {
+                                    Ok(chunk_response) => {
+                                        if let Some(choice) = chunk_response.choices.first() {
+                                            if let Some(content) = &choice.delta.content {
+                                                let _ = tx.send(Ok(StreamChunk {
+                                                    delta: content.clone(),
+                                                    done: false,
+                                                }));
+                                            }
+                                            if choice.finish_reason.is_some() {
+                                                let _ = tx.send(Ok(StreamChunk {
+                                                    delta: String::new(),
+                                                    done: true,
+                                                }));
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            error = ?e,
+                                            json = json_str,
+                                            "{} failed to parse stream chunk",
+                                            backend_label
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(anyhow!("{} stream error: {}", backend_label, e)));
+                        return;
+                    }
+                }
+            }
+
+            // Stream ended without [DONE] marker
+            let _ = tx.send(Ok(StreamChunk {
+                delta: String::new(),
+                done: true,
+            }));
+        });
+
+        Ok(rx)
+    }
 }
 
 #[derive(Default)]
@@ -310,6 +452,53 @@ impl LanguageModelProvider for MockProvider {
         config: &LlmConfig,
     ) -> Result<ChatResponse> {
         synthetic_response("Mock", messages, config).await
+    }
+
+    async fn send_chat_stream(
+        &self,
+        messages: &[ChatMessage],
+        config: &LlmConfig,
+    ) -> Result<mpsc::UnboundedReceiver<Result<StreamChunk>>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let prompt = messages
+            .iter()
+            .rev()
+            .find(|msg| msg.role == MessageRole::User)
+            .map(|msg| msg.content.clone())
+            .unwrap_or_else(|| "How can I help you today?".to_string());
+
+        let reply = format!(
+            "[Mock] Model {:?} (temp {:?}): received '{}'.",
+            config.model.as_deref().unwrap_or("default"),
+            config.temperature,
+            prompt
+        );
+
+        tokio::spawn(async move {
+            // Simulate streaming by sending chunks character by character
+            for chunk in reply.chars().collect::<Vec<_>>().chunks(5) {
+                sleep(Duration::from_millis(20)).await;
+                let delta: String = chunk.iter().collect();
+                if tx
+                    .send(Ok(StreamChunk {
+                        delta,
+                        done: false,
+                    }))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+
+            // Send completion marker
+            let _ = tx.send(Ok(StreamChunk {
+                delta: String::new(),
+                done: true,
+            }));
+        });
+
+        Ok(rx)
     }
 }
 
@@ -350,6 +539,32 @@ struct CompletionResponseMessage {
 struct CompletionUsage {
     prompt_tokens: Option<usize>,
     completion_tokens: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionStreamRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    messages: Vec<CompletionRequestMessage>,
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionStreamResponse {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
 }
 
 fn map_messages(messages: &[ChatMessage]) -> Vec<CompletionRequestMessage> {
