@@ -769,25 +769,6 @@ impl ChatPanel {
                                 markdown_cache,
                                 &message.content,
                             );
-                            let code_blocks = extract_code_blocks(&message.content);
-                            for block in code_blocks {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("Code ({})", block.language))
-                                            .color(palette.text_secondary)
-                                            .small(),
-                                    );
-                                    if ui
-                                        .button("Copy")
-                                        .on_hover_text("Copy code block to clipboard")
-                                        .clicked()
-                                    {
-                                        ui.output_mut(|out| {
-                                            out.copied_text = block.content.clone()
-                                        });
-                                    }
-                                });
-                            }
                             if !message.tool_calls.is_empty() {
                                 ui.collapsing("Tool calls", |ui| {
                                     for call in &message.tool_calls {
@@ -875,43 +856,6 @@ impl RoleLabel for ChatMessage {
             MessageRole::Tool => "Tool",
         }
     }
-}
-
-struct CodeBlock {
-    language: String,
-    content: String,
-}
-
-fn extract_code_blocks(content: &str) -> Vec<CodeBlock> {
-    let mut blocks = Vec::new();
-    let mut current_language = String::new();
-    let mut current = String::new();
-    let mut in_block = false;
-    for line in content.lines() {
-        if line.trim_start().starts_with("```") {
-            if in_block {
-                blocks.push(CodeBlock {
-                    language: current_language.clone(),
-                    content: current.trim().to_string(),
-                });
-                current.clear();
-                current_language.clear();
-                in_block = false;
-            } else {
-                in_block = true;
-                current_language = line.trim_matches('`').trim().to_string();
-                if current_language.is_empty() {
-                    current_language = "text".to_string();
-                }
-            }
-            continue;
-        }
-        if in_block {
-            current.push_str(line);
-            current.push('\n');
-        }
-    }
-    blocks
 }
 
 #[derive(Clone)]
