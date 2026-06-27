@@ -1,0 +1,9 @@
+[package]
+name = "patina"
+description = "Knowledge that improves with age.""
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Iwan van der Kleijn <iwanvanderkleijn@gmail.com>"]
+
+[dependencies]
