@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::db::init as db_init;
 use crate::output::{JsonEnvelope, WarningEntry, print_json};
-use crate::query::{fallback, fts, scorer};
+use crate::query::{fallback, fts, plan::QueryPlan, scorer};
 
 #[derive(Debug, Args)]
 pub struct QueryArgs {
@@ -56,8 +56,19 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
         .with_context(|| format!("failed to open Patina index {}", db_path.display()))?;
     db_init::validate_schema_version(&conn)?;
     let mut warnings = Vec::new();
+    let plan = QueryPlan::new(&args.terms);
 
-    let (mode, raw_results) = match fts::search(&conn, &args.terms, args.limit) {
+    if plan.is_empty() {
+        return Ok((
+            QueryData {
+                mode: "fts5".to_string(),
+                results: Vec::new(),
+            },
+            warnings,
+        ));
+    }
+
+    let (mode, raw_results) = match fts::search(&conn, &plan, args.limit) {
         Ok(results) => ("fts5".to_string(), results),
         Err(error) => {
             warnings.push(WarningEntry::new(
@@ -66,20 +77,19 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
             ));
             (
                 "lexical-fallback".to_string(),
-                fallback::search(&conn, &args.terms, args.limit)?,
+                fallback::search(&conn, &plan, args.limit)?,
             )
         }
     };
 
+    let raw_scores = raw_results
+        .iter()
+        .map(|result| result.raw_score)
+        .collect::<Vec<_>>();
     let normalized = if mode == "fts5" {
-        scorer::normalize_bm25(
-            &raw_results
-                .iter()
-                .map(|result| result.raw_score)
-                .collect::<Vec<_>>(),
-        )
+        scorer::normalize_bm25(&raw_scores)
     } else {
-        vec![1.0; raw_results.len()]
+        scorer::normalize_higher_is_better(&raw_scores)
     };
 
     let now = Utc::now();
@@ -88,7 +98,7 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
         .zip(normalized)
         .map(|(raw, normalized_fts)| {
             let components = scorer::score_components(
-                &args.terms,
+                plan.terms(),
                 normalized_fts,
                 raw.title.as_deref(),
                 raw.page_type.as_deref(),
@@ -103,7 +113,7 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
                 score: components.combined(),
                 excerpt: raw.excerpt,
                 score_components: args.explain.then_some(components),
-                matches: args.explain.then(|| vec![args.terms.clone()]),
+                matches: args.explain.then(|| plan.terms().to_vec()),
             }
         })
         .collect::<Vec<_>>();

@@ -25,7 +25,7 @@ impl ScoreComponents {
 }
 
 pub fn score_components(
-    query: &str,
+    terms: &[String],
     normalized_fts: f64,
     title: Option<&str>,
     page_type: Option<&str>,
@@ -35,12 +35,9 @@ pub fn score_components(
     modified_at: Option<&str>,
     now: DateTime<Utc>,
 ) -> ScoreComponents {
-    let query_lower = query.to_lowercase();
-    let title_bonus = title
-        .map(|title| title.to_lowercase().contains(&query_lower) as u8 as f64)
-        .unwrap_or(0.0);
-    let alias_bonus = json_list_contains_query(aliases, &query_lower);
-    let tag_bonus = json_list_contains_query(tags, &query_lower);
+    let title_bonus = field_contains_any_term(title, terms);
+    let alias_bonus = json_list_contains_any_term(aliases, terms);
+    let tag_bonus = json_list_contains_any_term(tags, terms);
     let page_type_bonus = page_type
         .map(|page_type| (page_type == "concept" || page_type == "decision") as u8 as f64)
         .unwrap_or(0.0);
@@ -58,12 +55,22 @@ pub fn score_components(
     }
 }
 
-fn json_list_contains_query(json: Option<&str>, query_lower: &str) -> f64 {
+fn field_contains_any_term(value: Option<&str>, terms: &[String]) -> f64 {
+    value
+        .map(|value| {
+            let lower = value.to_lowercase();
+            terms.iter().any(|term| lower.contains(term.as_str())) as u8 as f64
+        })
+        .unwrap_or(0.0)
+}
+
+fn json_list_contains_any_term(json: Option<&str>, terms: &[String]) -> f64 {
     json.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
         .map(|values| {
-            values
-                .iter()
-                .any(|value| value.to_lowercase().contains(query_lower)) as u8 as f64
+            values.iter().any(|value| {
+                let lower = value.to_lowercase();
+                terms.iter().any(|term| lower.contains(term.as_str()))
+            }) as u8 as f64
         })
         .unwrap_or(0.0)
 }
@@ -105,6 +112,22 @@ pub fn normalize_bm25(raw_scores: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+pub fn normalize_higher_is_better(raw_scores: &[f64]) -> Vec<f64> {
+    if raw_scores.is_empty() {
+        return Vec::new();
+    }
+
+    let max = raw_scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if max <= 0.0 {
+        return vec![0.0; raw_scores.len()];
+    }
+
+    raw_scores
+        .iter()
+        .map(|score| (score / max).clamp(0.0, 1.0))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +137,10 @@ mod tests {
         DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
             .expect("fixed timestamp should parse")
             .with_timezone(&Utc)
+    }
+
+    fn terms(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
     }
 
     #[test]
@@ -137,9 +164,14 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_higher_scores_as_better() {
+        assert_eq!(normalize_higher_is_better(&[1.0, 2.0]), vec![0.5, 1.0]);
+    }
+
+    #[test]
     fn alias_bonus_matches_substring() {
         let components = score_components(
-            "autonomy",
+            &terms(&["autonomy"]),
             1.0,
             None,
             None,
@@ -156,7 +188,7 @@ mod tests {
     #[test]
     fn alias_bonus_no_match() {
         let components = score_components(
-            "routing",
+            &terms(&["routing"]),
             1.0,
             None,
             None,
@@ -173,7 +205,7 @@ mod tests {
     #[test]
     fn tag_bonus_matches() {
         let components = score_components(
-            "agents",
+            &terms(&["agents"]),
             1.0,
             None,
             None,
@@ -191,8 +223,17 @@ mod tests {
     fn freshness_full_for_today() {
         let now = fixed_now();
         let modified = now.to_rfc3339();
-        let components =
-            score_components("x", 1.0, None, None, None, None, None, Some(&modified), now);
+        let components = score_components(
+            &terms(&["x"]),
+            1.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&modified),
+            now,
+        );
 
         assert_eq!(components.freshness, 1.0);
     }
@@ -201,17 +242,69 @@ mod tests {
     fn freshness_zero_for_old_document() {
         let now = fixed_now();
         let modified = (now - Duration::days(400)).to_rfc3339();
-        let components =
-            score_components("x", 1.0, None, None, None, None, None, Some(&modified), now);
+        let components = score_components(
+            &terms(&["x"]),
+            1.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&modified),
+            now,
+        );
 
         assert_eq!(components.freshness, 0.0);
     }
 
     #[test]
     fn freshness_zero_when_absent() {
-        let components =
-            score_components("x", 1.0, None, None, None, None, None, None, fixed_now());
+        let components = score_components(
+            &terms(&["x"]),
+            1.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            fixed_now(),
+        );
 
         assert_eq!(components.freshness, 0.0);
+    }
+
+    #[test]
+    fn title_bonus_matches_any_term() {
+        let components = score_components(
+            &terms(&["controlled", "autonomy", "important"]),
+            1.0,
+            Some("Controlled Autonomy"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            fixed_now(),
+        );
+
+        assert_eq!(components.title, 1.0);
+    }
+
+    #[test]
+    fn alias_bonus_matches_any_normalized_term() {
+        let components = score_components(
+            &terms(&["controlled", "autonomy", "important"]),
+            1.0,
+            None,
+            None,
+            None,
+            Some(r#"["controlled autonomy"]"#),
+            None,
+            None,
+            fixed_now(),
+        );
+
+        assert_eq!(components.alias, 1.0);
     }
 }

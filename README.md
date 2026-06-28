@@ -9,6 +9,8 @@
 
 Patina is a local-first, Git-compatible knowledge tool for software teams and AI-assisted development workflows. It keeps project knowledge in plain Markdown files, builds a disposable local SQLite index, and exposes deterministic CLI commands that both humans and coding agents can rely on.
 
+For motivation, etc behind Patina, see also [this article](https://www.linkedin.com/pulse/patina-turning-karpathys-llm-wiki-pattern-rust-cli-van-der-kleijn-hjm4e)
+
 ---
 
 ![Knowledge](./images/knowledge.png)

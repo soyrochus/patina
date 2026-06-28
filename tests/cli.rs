@@ -218,6 +218,49 @@ fn index_reset_and_query_work() {
 }
 
 #[test]
+fn query_normalizes_natural_language_for_retrieval_and_explain() {
+    let dir = temp_dir("query-natural-language");
+    copy_fixture("valid_repo", &dir);
+    let _ = run(&dir, &["index", "--reset", "--json"]);
+
+    let query = json(&run(
+        &dir,
+        &[
+            "query",
+            "why should agents use Patina as durable context",
+            "--json",
+            "--explain",
+        ],
+    ));
+
+    assert_eq!(query["ok"], true);
+    assert_eq!(query["data"]["mode"], "fts5");
+    let results = query["data"]["results"].as_array().expect("results");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|result| {
+        result["path"]
+            .as_str()
+            .is_some_and(|path| path.contains("agent-boundaries.md"))
+    }));
+    assert_eq!(
+        results[0]["matches"],
+        serde_json::json!(["agents", "patina", "durable", "context"])
+    );
+}
+
+#[test]
+fn query_blank_terms_returns_empty_success() {
+    let dir = temp_dir("query-blank");
+    copy_fixture("valid_repo", &dir);
+    let _ = run(&dir, &["index", "--reset", "--json"]);
+
+    let query = json(&run(&dir, &["query", "   ", "--json"]));
+
+    assert_eq!(query["ok"], true);
+    assert_eq!(query["data"]["results"], serde_json::json!([]));
+}
+
+#[test]
 fn index_full_rebuild_after_patina_delete_allows_query() {
     let dir = temp_dir("index-full");
     copy_fixture("valid_repo", &dir);
