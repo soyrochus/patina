@@ -112,8 +112,10 @@ cargo install --path .
 **From crates.io** (when published):
 
 ```bash
-cargo install patina
+cargo install kb-patina
 ```
+
+This is the crate name. THe executable is called 'patina'. 
 
 **From a Git checkout:**
 
