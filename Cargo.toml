@@ -1,10 +1,28 @@
 [package]
 name = "patina"
-description = "Knowledge that improves with age."
 version = "0.4.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Local-first, Git-compatible Markdown knowledge tool for AI-assisted development."
 license = "MIT"
 authors = ["Iwan van der Kleijn <iwanvanderkleijn@gmail.com>"]
+repository = "https://github.com/soyrochus/patina"
+homepage = "https://github.com/soyrochus/patina"
+documentation = "https://github.com/soyrochus/patina#readme"
+readme = "README.md"
+keywords = ["knowledge", "markdown", "cli", "ai", "rust"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+  ".patina/",
+  "target/",
+  "dist/",
+  ".github/",
+  "*.log"
+]
+
+[[bin]]
+name = "patina"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
