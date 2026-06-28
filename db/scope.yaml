@@ -1,0 +1,18 @@
+root: db
+default_visibility: project
+allowed_statuses:
+  - draft
+  - active
+  - deprecated
+  - archived
+allowed_types:
+  - concept
+  - system
+  - project
+  - decision
+  - person
+  - process
+  - glossary
+  - source
+  - index
+  - open-question

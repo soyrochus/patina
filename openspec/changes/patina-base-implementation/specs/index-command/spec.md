@@ -59,6 +59,19 @@ When a document with `source_refs` is indexed, Patina SHALL record the current S
 - **WHEN** a page with `source_refs: ["knowledge/sources/notes.md"]` is indexed
 - **THEN** `source_refs.source_hash_at_index` contains the SHA-256 of `notes.md` at index time
 
+### Requirement: Scope classification capture at index time
+When a document is indexed, Patina SHALL read the `scope` field from `knowledge/scope.yaml` (if present) and store it in `documents.scope_classification`. If no `scope.yaml` exists or the field is absent, `scope_classification` SHALL be stored as NULL.
+
+#### Scenario: Scope classification stored during indexing
+
+- **WHEN** `knowledge/scope.yaml` has `scope: client-confidential` and `patina index` runs
+- **THEN** every indexed document row has `scope_classification = "client-confidential"`
+
+#### Scenario: No scope.yaml — classification stored as NULL
+
+- **WHEN** no `knowledge/scope.yaml` exists
+- **THEN** every indexed document row has `scope_classification = NULL`
+
 ### Requirement: Index JSON output
 `patina index --json` SHALL return the standard JSON envelope with indexing statistics in `data` (files processed, chunks created, errors encountered).
 

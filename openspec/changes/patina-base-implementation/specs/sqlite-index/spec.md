@@ -12,11 +12,23 @@ Patina SHALL create a `meta` table in the SQLite database with at minimum the ke
 - **THEN** `SELECT value FROM meta WHERE key = 'schema_version'` returns the version string
 
 ### Requirement: documents table
-Patina SHALL maintain a `documents` table with the following columns: `id INTEGER PRIMARY KEY`, `path TEXT NOT NULL UNIQUE`, `title TEXT`, `type TEXT`, `status TEXT`, `sha256 TEXT NOT NULL`, `modified_at TEXT`, `indexed_at TEXT`, `front_matter_updated TEXT`, `review_after TEXT`.
+Patina SHALL maintain a `documents` table with the following columns: `id INTEGER PRIMARY KEY`, `path TEXT NOT NULL UNIQUE`, `title TEXT`, `type TEXT`, `status TEXT`, `sha256 TEXT NOT NULL`, `modified_at TEXT`, `indexed_at TEXT`, `front_matter_updated TEXT`, `review_after TEXT`, `scope_classification TEXT`.
+
+The `scope_classification` column SHALL store the value of the `scope` field from `knowledge/scope.yaml` at the time the document was last indexed. If no `scope.yaml` exists or no `scope` field is present, the column SHALL be NULL.
 
 #### Scenario: Document is indexed
 - **WHEN** a Markdown file is indexed
 - **THEN** a row is inserted or updated in `documents` with the correct `path`, `sha256`, and front matter fields
+
+#### Scenario: scope_classification is recorded at index time
+
+- **WHEN** `knowledge/scope.yaml` contains `scope: client-confidential` and a document is indexed
+- **THEN** `documents.scope_classification` for that document is `"client-confidential"`
+
+#### Scenario: scope_classification is NULL when scope.yaml is absent
+
+- **WHEN** no `knowledge/scope.yaml` exists
+- **THEN** `documents.scope_classification` is NULL for all documents
 
 ### Requirement: chunks table
 Patina SHALL maintain a `chunks` table with columns: `id INTEGER PRIMARY KEY`, `document_id INTEGER NOT NULL`, `ordinal INTEGER NOT NULL`, `heading_path TEXT`, `text TEXT NOT NULL`, `token_estimate INTEGER`, `sha256 TEXT NOT NULL`, and a foreign key to `documents`.

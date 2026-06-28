@@ -1,0 +1,1 @@
+initialized Patina knowledge directory at <TMP>/knowledge
