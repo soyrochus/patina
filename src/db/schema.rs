@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMA_VERSION: &str = "2";
 
 pub const CREATE_META_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS documents (
     indexed_at TEXT,
     front_matter_updated TEXT,
     review_after TEXT,
-    scope_classification TEXT
+    scope_classification TEXT,
+    aliases TEXT,
+    tags TEXT
 );
 "#;
 

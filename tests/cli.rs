@@ -176,6 +176,31 @@ fn index_reset_and_query_work() {
             .expect("results")
             .is_empty()
     );
+    let controlled_autonomy = query["data"]["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .find(|result| {
+            result["path"]
+                .as_str()
+                .is_some_and(|path| path.contains("controlled-autonomy.md"))
+        })
+        .expect("controlled-autonomy result should exist");
+    assert_eq!(controlled_autonomy["score_components"]["alias"], 1.0);
+    assert_eq!(controlled_autonomy["score_components"]["freshness"], 1.0);
+
+    let tag_query = json(&run(&dir, &["query", "agents", "--json", "--explain"]));
+    let agent_boundaries = tag_query["data"]["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .find(|result| {
+            result["path"]
+                .as_str()
+                .is_some_and(|path| path.contains("agent-boundaries.md"))
+        })
+        .expect("agent-boundaries result should exist");
+    assert_eq!(agent_boundaries["score_components"]["tag"], 1.0);
 }
 
 #[test]
@@ -230,6 +255,56 @@ fn doctor_json_on_initialized_repo_has_checks() {
     let value = json(&run(&dir, &["doctor", "--json"]));
 
     assert!(value["data"]["checks"].is_array());
+}
+
+#[test]
+fn doctor_human_output_aligns_columns() {
+    let dir = temp_dir("doctor-columns");
+    init_git(&dir);
+    copy_fixture("valid_repo", &dir);
+    fs::write(dir.join(".gitignore"), ".patina/\n").expect(".gitignore should write");
+    fs::write(dir.join("knowledge/README.md"), "# Knowledge\n").expect("README should write");
+    fs::write(dir.join("knowledge/AGENTS.md"), "# Agents\n").expect("AGENTS should write");
+    let _ = run(&dir, &["index", "--reset", "--json"]);
+
+    let output = run(&dir, &["doctor"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(!stdout.contains('\t'));
+
+    let mut column_starts = stdout
+        .lines()
+        .map(|line| {
+            line.char_indices()
+                .filter_map(|(index, character)| {
+                    if !character.is_whitespace()
+                        && (index == 0
+                            || line[..index]
+                                .chars()
+                                .next_back()
+                                .is_some_and(|character| character.is_whitespace()))
+                    {
+                        Some(index)
+                    } else {
+                        None
+                    }
+                })
+                .take(3)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(!column_starts.is_empty());
+    let expected = column_starts.remove(0);
+    assert_eq!(expected.len(), 3);
+    for starts in column_starts {
+        assert_eq!(starts[..3], expected[..3]);
+    }
 }
 
 #[test]
@@ -310,7 +385,30 @@ fn unsupported_schema_version_suggests_reset() {
 }
 
 #[test]
-fn fresh_index_has_schema_version_one() {
+fn schema_version_one_suggests_reset() {
+    let dir = temp_dir("schema-version-one");
+    fs::create_dir_all(dir.join(".patina")).expect(".patina should exist");
+    let conn =
+        rusqlite::Connection::open(dir.join(".patina/index.sqlite")).expect("db should open");
+    conn.execute(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .expect("meta should create");
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', '1')",
+        [],
+    )
+    .expect("schema version should insert");
+
+    let output = run(&dir, &["query", "term", "--json"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("patina index --reset"));
+}
+
+#[test]
+fn fresh_index_has_schema_version_two() {
     let dir = temp_dir("schema-fresh");
     copy_fixture("valid_repo", &dir);
     let _ = run(&dir, &["index", "--reset", "--json"]);
@@ -324,7 +422,7 @@ fn fresh_index_has_schema_version_one() {
         )
         .expect("schema_version should exist");
 
-    assert_eq!(version, "1");
+    assert_eq!(version, "2");
 }
 
 #[test]

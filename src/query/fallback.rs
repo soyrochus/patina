@@ -12,6 +12,9 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<RawRes
                 d.title,
                 d.type,
                 d.scope_classification,
+                d.aliases,
+                d.tags,
+                d.modified_at,
                 c.text
              FROM chunks c
              JOIN documents d ON d.id = c.document_id
@@ -27,7 +30,10 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<RawRes
                 title: row.get(1)?,
                 page_type: row.get(2)?,
                 scope_classification: row.get(3)?,
-                excerpt: row.get::<_, String>(4)?.chars().take(240).collect(),
+                aliases: row.get(4)?,
+                tags: row.get(5)?,
+                modified_at: row.get(6)?,
+                excerpt: row.get::<_, String>(7)?.chars().take(240).collect(),
                 raw_score: 1.0,
             })
         })

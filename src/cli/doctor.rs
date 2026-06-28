@@ -41,11 +41,29 @@ pub fn run(args: DoctorArgs, config: &PatinaConfig) -> Result<()> {
             Vec::new(),
         ))?;
     } else {
-        for check in checks {
-            println!("{}\t{}\t{}", check.status, check.name, check.message);
-        }
+        print_human_checks(&checks);
     }
     Ok(())
+}
+
+fn print_human_checks(checks: &[DoctorCheck]) {
+    let status_width = checks
+        .iter()
+        .map(|check| check.status.len())
+        .max()
+        .unwrap_or("status".len());
+    let name_width = checks
+        .iter()
+        .map(|check| check.name.len())
+        .max()
+        .unwrap_or("check".len());
+
+    for check in checks {
+        println!(
+            "{:<status_width$}  {:<name_width$}  {}",
+            check.status, check.name, check.message
+        );
+    }
 }
 
 fn run_checks(config: &PatinaConfig) -> Result<Vec<DoctorCheck>> {

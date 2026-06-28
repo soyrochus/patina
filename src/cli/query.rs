@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use clap::Args;
 use rusqlite::Connection;
 use serde::Serialize;
@@ -81,6 +82,7 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
         vec![1.0; raw_results.len()]
     };
 
+    let now = Utc::now();
     let mut results = raw_results
         .into_iter()
         .zip(normalized)
@@ -91,6 +93,10 @@ fn run_query(args: &QueryArgs) -> Result<(QueryData, Vec<WarningEntry>)> {
                 raw.title.as_deref(),
                 raw.page_type.as_deref(),
                 raw.scope_classification.as_deref(),
+                raw.aliases.as_deref(),
+                raw.tags.as_deref(),
+                raw.modified_at.as_deref(),
+                now,
             );
             QueryResult {
                 path: raw.path,

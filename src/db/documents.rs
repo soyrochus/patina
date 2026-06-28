@@ -13,6 +13,8 @@ pub struct DocumentRecord {
     pub front_matter_updated: Option<String>,
     pub review_after: Option<String>,
     pub scope_classification: Option<String>,
+    pub aliases: Option<String>,
+    pub tags: Option<String>,
 }
 
 pub fn stored_sha256(conn: &Connection, path: &str) -> Result<Option<String>> {
@@ -29,8 +31,8 @@ pub fn upsert(conn: &Connection, record: &DocumentRecord) -> Result<i64> {
     conn.execute(
         "INSERT INTO documents (
             path, title, type, status, sha256, modified_at, indexed_at,
-            front_matter_updated, review_after, scope_classification
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            front_matter_updated, review_after, scope_classification, aliases, tags
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ON CONFLICT(path) DO UPDATE SET
             title = excluded.title,
             type = excluded.type,
@@ -40,7 +42,9 @@ pub fn upsert(conn: &Connection, record: &DocumentRecord) -> Result<i64> {
             indexed_at = excluded.indexed_at,
             front_matter_updated = excluded.front_matter_updated,
             review_after = excluded.review_after,
-            scope_classification = excluded.scope_classification",
+            scope_classification = excluded.scope_classification,
+            aliases = excluded.aliases,
+            tags = excluded.tags",
         params![
             record.path,
             record.title,
@@ -52,6 +56,8 @@ pub fn upsert(conn: &Connection, record: &DocumentRecord) -> Result<i64> {
             record.front_matter_updated,
             record.review_after,
             record.scope_classification,
+            record.aliases,
+            record.tags,
         ],
     )
     .with_context(|| format!("failed to upsert document {}", record.path))?;

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,25 +30,58 @@ pub fn score_components(
     title: Option<&str>,
     page_type: Option<&str>,
     scope_classification: Option<&str>,
+    aliases: Option<&str>,
+    tags: Option<&str>,
+    modified_at: Option<&str>,
+    now: DateTime<Utc>,
 ) -> ScoreComponents {
     let query_lower = query.to_lowercase();
     let title_bonus = title
         .map(|title| title.to_lowercase().contains(&query_lower) as u8 as f64)
         .unwrap_or(0.0);
+    let alias_bonus = json_list_contains_query(aliases, &query_lower);
+    let tag_bonus = json_list_contains_query(tags, &query_lower);
     let page_type_bonus = page_type
         .map(|page_type| (page_type == "concept" || page_type == "decision") as u8 as f64)
         .unwrap_or(0.0);
+    let freshness_bonus = freshness_bonus(modified_at, now);
     let provenance_bonus = scope_classification.is_some() as u8 as f64;
 
     ScoreComponents {
         fts: normalized_fts.clamp(0.0, 1.0),
         title: title_bonus,
-        alias: 0.0,
-        tag: 0.0,
+        alias: alias_bonus,
+        tag: tag_bonus,
         page_type: page_type_bonus,
-        freshness: 0.5,
+        freshness: freshness_bonus,
         provenance: provenance_bonus,
     }
+}
+
+fn json_list_contains_query(json: Option<&str>, query_lower: &str) -> f64 {
+    json.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+        .map(|values| {
+            values
+                .iter()
+                .any(|value| value.to_lowercase().contains(query_lower)) as u8 as f64
+        })
+        .unwrap_or(0.0)
+}
+
+fn freshness_bonus(modified_at: Option<&str>, now: DateTime<Utc>) -> f64 {
+    const DECAY_WINDOW_DAYS: i64 = 365;
+
+    modified_at
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|modified| {
+            let age_days = (now - modified.with_timezone(&Utc)).num_days().max(0);
+            if age_days >= DECAY_WINDOW_DAYS {
+                0.0
+            } else {
+                (DECAY_WINDOW_DAYS - age_days) as f64 / DECAY_WINDOW_DAYS as f64
+            }
+        })
+        .unwrap_or(0.0)
 }
 
 pub fn normalize_bm25(raw_scores: &[f64]) -> Vec<f64> {
@@ -74,6 +108,13 @@ pub fn normalize_bm25(raw_scores: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
+
+    fn fixed_now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .expect("fixed timestamp should parse")
+            .with_timezone(&Utc)
+    }
 
     #[test]
     fn weights_sum_to_one() {
@@ -93,5 +134,84 @@ mod tests {
     #[test]
     fn normalizes_single_result_to_one() {
         assert_eq!(normalize_bm25(&[-3.0]), vec![1.0]);
+    }
+
+    #[test]
+    fn alias_bonus_matches_substring() {
+        let components = score_components(
+            "autonomy",
+            1.0,
+            None,
+            None,
+            None,
+            Some(r#"["controlled autonomy","agent loop"]"#),
+            None,
+            None,
+            fixed_now(),
+        );
+
+        assert_eq!(components.alias, 1.0);
+    }
+
+    #[test]
+    fn alias_bonus_no_match() {
+        let components = score_components(
+            "routing",
+            1.0,
+            None,
+            None,
+            None,
+            Some(r#"["controlled autonomy"]"#),
+            None,
+            None,
+            fixed_now(),
+        );
+
+        assert_eq!(components.alias, 0.0);
+    }
+
+    #[test]
+    fn tag_bonus_matches() {
+        let components = score_components(
+            "agents",
+            1.0,
+            None,
+            None,
+            None,
+            None,
+            Some(r#"["agents","architecture"]"#),
+            None,
+            fixed_now(),
+        );
+
+        assert_eq!(components.tag, 1.0);
+    }
+
+    #[test]
+    fn freshness_full_for_today() {
+        let now = fixed_now();
+        let modified = now.to_rfc3339();
+        let components =
+            score_components("x", 1.0, None, None, None, None, None, Some(&modified), now);
+
+        assert_eq!(components.freshness, 1.0);
+    }
+
+    #[test]
+    fn freshness_zero_for_old_document() {
+        let now = fixed_now();
+        let modified = (now - Duration::days(400)).to_rfc3339();
+        let components =
+            score_components("x", 1.0, None, None, None, None, None, Some(&modified), now);
+
+        assert_eq!(components.freshness, 0.0);
+    }
+
+    #[test]
+    fn freshness_zero_when_absent() {
+        let components =
+            score_components("x", 1.0, None, None, None, None, None, None, fixed_now());
+
+        assert_eq!(components.freshness, 0.0);
     }
 }

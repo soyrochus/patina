@@ -143,6 +143,8 @@ fn build_full_index(
             front_matter_updated: string_field(&parsed.front_matter, "updated"),
             review_after: string_field(&parsed.front_matter, "review_after"),
             scope_classification: scope_classification.clone(),
+            aliases: yaml_sequence_as_json(&parsed.front_matter, "aliases"),
+            tags: yaml_sequence_as_json(&parsed.front_matter, "tags"),
         };
         let document_id = documents::upsert(&tx, &record)?;
         chunks::replace_for_document(&tx, document_id, &chunks_for_file, fts5_available)?;
@@ -164,6 +166,24 @@ fn string_field(
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn yaml_sequence_as_json(
+    front_matter: &std::collections::BTreeMap<String, Value>,
+    field: &str,
+) -> Option<String> {
+    let strings = front_matter
+        .get(field)
+        .and_then(Value::as_sequence)?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+
+    if strings.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&strings).ok()
+    }
 }
 
 fn modified_at(path: &Path) -> Option<String> {

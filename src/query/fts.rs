@@ -7,6 +7,9 @@ pub struct RawResult {
     pub title: Option<String>,
     pub page_type: Option<String>,
     pub scope_classification: Option<String>,
+    pub aliases: Option<String>,
+    pub tags: Option<String>,
+    pub modified_at: Option<String>,
     pub excerpt: String,
     pub raw_score: f64,
 }
@@ -19,6 +22,9 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<RawRes
                 d.title,
                 d.type,
                 d.scope_classification,
+                d.aliases,
+                d.tags,
+                d.modified_at,
                 c.text,
                 bm25(chunks_fts) AS score
              FROM chunks_fts
@@ -37,8 +43,11 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<RawRes
                 title: row.get(1)?,
                 page_type: row.get(2)?,
                 scope_classification: row.get(3)?,
-                excerpt: excerpt(row.get::<_, String>(4)?.as_str(), query),
-                raw_score: row.get(5)?,
+                aliases: row.get(4)?,
+                tags: row.get(5)?,
+                modified_at: row.get(6)?,
+                excerpt: excerpt(row.get::<_, String>(7)?.as_str(), query),
+                raw_score: row.get(8)?,
             })
         })
         .context("failed to execute FTS5 query")?;
