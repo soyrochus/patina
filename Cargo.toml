@@ -1,7 +1,7 @@
 [package]
 name = "patina"
 description = "Knowledge that improves with age."
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 authors = ["Iwan van der Kleijn <iwanvanderkleijn@gmail.com>"]

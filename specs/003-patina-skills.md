@@ -398,6 +398,13 @@ The same template shall be used for GitHub Copilot, Codex, and Claude Code.
 
 The `<knowledge_dir>` placeholder shall be replaced at write time with the configured knowledge directory.
 
+For v0.4.0 and later, this template assumes `patina query` supports
+natural-language query normalization as specified in
+`specs/004-natural-language-query-retrieval.md`. Agents should still prefer
+concise search terms when they are obvious, but they may pass the user's
+natural-language question directly when preserving the user's wording is more
+useful.
+
 ```markdown
 ---
 name: patina-query
@@ -420,12 +427,16 @@ The shared Patina operating instructions are in:
 
 ## Workflow
 
-1. Convert the user's request into a concise search query.
+1. Choose a search query.
+
+   Prefer concise keywords when the relevant terms are clear. Natural-language
+   questions are also supported; `patina query` normalizes them into lexical
+   search terms.
 
 2. Run:
 
    ```bash
-   patina query "<terms>" --json --limit 5
+   patina query "<terms-or-question>" --json --limit 5
    ```
 
 3. Inspect the JSON response.
