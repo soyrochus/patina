@@ -1,0 +1,19 @@
+# Patina configuration for this repository.
+# All keys are optional — defaults are shown as comments.
+
+[knowledge]
+# dir = "knowledge"   # default; change this to use a different directory name
+
+[index]
+# chunk_size = 1200
+# chunk_overlap = 150
+# chunk_strategy = "heading-aware"
+
+[limits]
+# max_markdown_file_mb = 10
+# max_source_file_mb = 50
+# max_total_markdown_files = 50000
+
+[security]
+# allow_internal_symlinks = false
+# allow_external_symlinks = false

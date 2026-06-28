@@ -1,69 +1,412 @@
 # Patina
 
-Patina is a local-first Markdown knowledge tool for making AI-assisted synthesis durable. It keeps project knowledge in Git, builds a disposable local SQLite index, and exposes deterministic CLI commands for humans and agents.
+> *Knowledge that improves with age.*
 
-The project is inspired by Andrej Karpathy's LLM Wiki pattern: keep useful context in plain files, make retrieval cheap, and let agents read from the same durable knowledge base people maintain.
+[![CI](https://github.com/soyrochus/patina/actions/workflows/release.yml/badge.svg)](https://github.com/soyrochus/patina/actions/workflows/release.yml)
+[![Crates.io](https://img.shields.io/crates/v/patina.svg)](https://crates.io/crates/patina)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://choosealicense.com/licenses/mit/)
+[![Rust: 2024 edition](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org)
 
-## Quick Start
+Patina is a local-first, Git-compatible knowledge tool for software teams and AI-assisted development workflows. It keeps project knowledge in plain Markdown files, builds a disposable local SQLite index, and exposes deterministic CLI commands that both humans and coding agents can rely on.
 
-```bash
-cargo install --path .
-patina init
-patina index --reset
-patina query "controlled autonomy"
+---
+
+## The Idea Behind Patina
+
+### The LLM Wiki pattern
+
+The concept originates from Andrej Karpathy's **LLM Wiki** idea: instead of letting AI-generated synthesis disappear into chat history, you accumulate it as an evolving Markdown wiki. Raw source material — meeting notes, specs, articles, decisions — lives in one layer. Curated, cross-linked wiki pages synthesizing that material live in another. An LLM or coding agent helps maintain the wiki over time: creating pages, updating them when sources change, surfacing contradictions, and filling gaps.
+
+The appeal is that the knowledge base becomes a durable team artifact rather than a personal chat transcript. It can be read without a special application, reviewed as normal Git diffs, and queried repeatedly by any tool that can run a CLI command.
+
+### What Patina adds
+
+Patina takes the LLM Wiki idea and makes it an engineering-grade tool:
+
+- **Git is the source of truth.** Knowledge files are committed, reviewed, and versioned like code. The local index is generated state — always rebuildable, never committed.
+- **Provenance is explicit.** Every wiki page can declare which source files it was synthesized from. Patina tracks source hashes and warns when a referenced source has changed since the page was last reviewed.
+- **Retrieval is deterministic.** Chunking, indexing, and scoring use stable algorithms. The same query against the same knowledge base always produces the same result ranking.
+- **The CLI is the contract.** Agent integrations are thin instruction files that tell tools how to call `patina query`, `patina read`, `patina lint`, and `patina stale`. There is no MCP server, no hosted service, and no vendor lock-in in the v0.1 core.
+
+The project is intentionally *not*:
+
+- an Obsidian-specific vault format (works with any Markdown editor)
+- a vector database (lexical FTS5 first; semantic retrieval is a planned future layer)
+- a chat memory system (everything is inspectable files)
+- tied to a particular AI provider or agent framework
+
+This design comes from the repository's own knowledge base. The `knowledge/` directory at the root of this repository is a live Patina knowledge base about Patina itself — the `knowledge/wiki/` pages were synthesized from the specification notes in `knowledge/sources/` and are cross-linked, front-matter-tagged, and tracked with the same provenance model described below.
+
+---
+
+## Directory Layout
+
+A Patina-managed repository has two layers:
+
+```text
+knowledge/          ← committed to Git; the durable knowledge base
+  AGENTS.md         ← instructions for AI agents using this repo
+  README.md         ← human-readable index
+  scope.yaml        ← optional confidentiality and export policy
+  wiki/             ← synthesized, curated Markdown pages
+  sources/          ← raw source notes, summaries, extracted content
+  schemas/          ← page-type schemas (documentation / future enforcement)
+
+.patina/            ← Git-ignored; generated local state; always disposable
+  index.sqlite      ← SQLite FTS5 index of all knowledge pages
+  index.lock        ← advisory lock file for concurrent safety
 ```
 
-Core commands:
+The design boundary is strict: **everything under `knowledge/` is canonical**; everything under `.patina/` is a cache. If `.patina/` is deleted, `patina index --full` reconstructs it completely from the Markdown files.
 
-```bash
-patina lint --json
-patina read knowledge/wiki/example.md --json
-patina stale --json
-patina doctor --json
-patina install-agent --agent claude-code
+---
+
+## Page Format
+
+Every wiki page is a Markdown file with a YAML front matter block:
+
+```markdown
+---
+title: Controlled Agent Autonomy
+type: concept
+status: active
+aliases:
+  - controlled autonomy
+  - agent autonomy
+tags:
+  - agents
+  - architecture
+review_after: 2026-12-01
+source_refs:
+  - sources/workshop-notes.md
+  - sources/spec-001-base-implementation.md
+---
+
+# Controlled Agent Autonomy
+
+...page content...
 ```
+
+**Required fields:** `title`, `type`, `status`
+
+**Supported `type` values:** `concept`, `system`, `project`, `decision`, `person`, `process`, `glossary`, `source`, `index`, `open-question`
+
+**Supported `status` values:** `draft`, `active`, `deprecated`, `archived`
+
+`source_refs` lists the local source files the page was synthesized from. Patina records the SHA-256 of each source at index time and warns via `patina stale` when a source has changed since the page was last reviewed. `review_after` triggers a staleness warning when the date passes.
+
+---
 
 ## Install
 
-From this repository:
+**From this repository:**
 
 ```bash
 cargo install --path .
 ```
 
-From a Git checkout:
+**From crates.io** (when published):
+
+```bash
+cargo install patina
+```
+
+**From a Git checkout:**
 
 ```bash
 cargo install --git https://github.com/soyrochus/patina.git
 ```
 
-Release builds are produced for Linux x64, macOS x64, macOS arm64, and Windows x64 when a version tag is pushed.
+Pre-built binaries for Linux x64, macOS x64, macOS arm64, and Windows x64 are attached to each [GitHub Release](https://github.com/soyrochus/patina/releases). Download the archive for your platform and place the `patina` binary on your `PATH`.
 
-## Data Model
+No Python, Node.js, ChromaDB, or database server is required. Patina ships with SQLite bundled in the binary.
 
-Patina stores source knowledge in `knowledge/` as Markdown with YAML front matter. The local index lives in `.patina/` and is intentionally disposable. Deleting `.patina/` and running `patina index --full` reconstructs the index from committed knowledge files.
+---
 
-## Independence
+## Configuration File
 
-Patina is not tied to Obsidian, Claude, MCP, ChromaDB, Python, Node.js, or a hosted service. The CLI is the stable contract; agent-specific files are thin instruction wrappers around `patina query`, `patina read`, `patina lint`, and `patina stale`.
+Patina reads an optional `patina.toml` from the repository root. If the file is absent, all defaults apply. A minimal annotated file is included in this repository:
 
+```toml
+# patina.toml
+
+[knowledge]
+# dir = "knowledge"   # default; change to use a different directory name
+
+[index]
+# chunk_size = 1200
+# chunk_overlap = 150
+# chunk_strategy = "heading-aware"
+
+[limits]
+# max_markdown_file_mb = 10
+# max_source_file_mb = 50
+# max_total_markdown_files = 50000
+
+[security]
+# allow_internal_symlinks = false
+# allow_external_symlinks = false
+```
+
+### Naming the knowledge directory
+
+`knowledge/` is the default, but the name is not mandatory. If your project already uses a different convention, set `knowledge.dir` in `patina.toml`:
+
+```toml
+[knowledge]
+dir = "docs"       # or "wiki", "notes", "context", anything you prefer
+```
+
+Every Patina command resolves file paths relative to the configured directory. The name shown in `patina status`, `patina doctor`, and all JSON output reflects whatever you set here. The only fixed rule is that the directory must live inside the repository root.
+
+---
+
+## Getting Started
+
+```bash
+# Initialise a new knowledge base in the current Git repository
+patina init
+
+# Add some Markdown pages to knowledge/wiki/ ...
+
+# Build the local index
+patina index --reset
+
+# Search
+patina query "controlled autonomy"
+
+# Read a specific page
+patina read knowledge/wiki/concepts/controlled-agent-autonomy.md
+
+# Check for broken links, missing front matter, and duplicate aliases
+patina lint
+
+# Check whether any referenced sources have changed
+patina stale
+
+# Diagnose the local environment
+patina doctor
+```
+
+---
+
+## Command Reference
+
+### `patina init`
+
+Scaffolds the knowledge directory structure, adds `.patina/` to `.gitignore`, and optionally detects Git worktree presence.
+
+```bash
+patina init           # warn if outside Git
+patina init --no-git  # skip the Git check
+```
+
+### `patina status`
+
+Reports the current state of the repository and index: Git worktree presence, uncommitted knowledge changes, index age, and scope metadata.
+
+```bash
+patina status
+patina status --json
+```
+
+### `patina lint`
+
+Validates every Markdown page in the knowledge directory:
+
+- Required front matter fields (`title`, `type`, `status`)
+- Allowed `type` and `status` values
+- Page-type-specific required fields (configurable)
+- Internal link targets
+- Alias uniqueness across all pages
+- Source reference existence
+- Scope provenance
+
+```bash
+patina lint
+patina lint --json
+```
+
+### `patina index`
+
+Builds (or rebuilds) the local SQLite index with deterministic heading-aware chunking and FTS5 full-text search.
+
+```bash
+patina index           # incremental: only changed files
+patina index --full    # re-index all files
+patina index --reset   # drop and rebuild from scratch (atomic)
+patina index --json
+```
+
+Chunking splits each Markdown file by its heading tree. Each heading section becomes one logical chunk. Sections exceeding the configured token limit are split at paragraph boundaries with configurable overlap. Every chunk receives a SHA-256 hash, making re-index detection exact.
+
+### `patina query`
+
+Searches the index using SQLite FTS5 BM25 ranking. Results are scored with a transparent seven-component formula:
+
+| Component    | Weight | Signal                              |
+| ------------ | ------ | ----------------------------------- |
+| FTS5 BM25    | 70%    | Full-text relevance                 |
+| Title match  | 10%    | Query term in page title            |
+| Alias match  | 7%     | Query term in declared aliases      |
+| Tag match    | 5%     | Query term in declared tags         |
+| Page type    | 3%     | Preferred types (concept, decision) |
+| Freshness    | 3%     | Linear decay over 365 days          |
+| Provenance   | 2%     | Page has source references          |
+
+```bash
+patina query "controlled autonomy"
+patina query "agent loop" --limit 5
+patina query "decision" --json
+patina query "architecture" --json --explain   # include score breakdown
+```
+
+If FTS5 is unavailable, Patina falls back to LIKE-based search and notes the degraded mode in the output.
+
+### `patina read`
+
+Returns the content of a knowledge page. Canonicalizes paths and enforces a strict knowledge-root boundary — no path traversal, no symlinks resolving outside the root.
+
+```bash
+patina read knowledge/wiki/concepts/controlled-agent-autonomy.md
+patina read knowledge/wiki/concepts/controlled-agent-autonomy.md --json
+```
+
+### `patina stale`
+
+Checks for pages that may need review:
+
+- `review_after` date has passed
+- A referenced source file has changed since the page was last indexed
+- A referenced source file is missing
+- A `deprecated` page is still linked from `active` pages
+- A `draft` page is older than the configured age threshold (default: 90 days)
+
+```bash
+patina stale
+patina stale --json
+```
+
+### `patina doctor`
+
+Diagnoses the local environment: Git worktree, knowledge directory presence, SQLite integrity, FTS5 availability, schema version, file permissions, agent instruction files, and scope configuration validity.
+
+```bash
+patina doctor
+patina doctor --json
+```
+
+### `patina install-agent`
+
+Writes agent instruction files so that AI coding agents know how to use Patina commands in this repository.
+
+```bash
+patina install-agent                     # writes knowledge/AGENTS.md
+patina install-agent --agent claude-code # also writes .claude/CLAUDE.md
+patina install-agent --force             # overwrite existing files
+patina install-agent --json
+```
+
+---
+
+## JSON Output
+
+Every command accepts `--json` and returns a stable envelope:
+
+```json
+{
+  "version": "0.1",
+  "command": "query",
+  "ok": true,
+  "data": { ... },
+  "warnings": [],
+  "errors": []
+}
+```
+
+On failure, `ok` is `false`, `data` is `null`, and `errors` contains structured entries with `code`, `message`, `severity`, and optionally `path`. This envelope is designed for agent consumption: a coding agent can call `patina lint --json` and parse `errors` without screen-scraping.
+
+---
+
+## Configuration
+
+Patina reads `patina.toml` from the repository root. All keys are optional; defaults are applied when the file is absent or incomplete.
+
+```toml
+[knowledge]
+dir = "knowledge"
+
+[index]
+chunk_size = 1200          # estimated tokens per chunk
+chunk_overlap = 150        # token overlap when splitting large sections
+chunk_strategy = "heading-aware"
+
+[limits]
+max_markdown_file_mb = 10
+max_source_file_mb = 50
+max_total_markdown_files = 50000
+
+[security]
+allow_internal_symlinks = false
+allow_external_symlinks = false
+
+[lint.page_types.decision]
+required = ["title", "type", "status", "decided_on"]
+
+[lint.page_types.source]
+required = ["title", "type", "status", "source_kind"]
+```
+
+---
+
+## Agent Usage
+
+Agents should treat Patina as read-mostly durable context.
+
+**Finding relevant knowledge:**
+
+```bash
+patina query "topic of interest" --json --limit 5
+```
+
+**Reading a specific page:**
+
+```bash
+patina read knowledge/wiki/systems/control-plane.md --json
+```
+
+**Checking knowledge health before writing:**
+
+```bash
+patina lint --json
+patina stale --json
+```
+
+**After adding or updating a page:**
+
+```bash
+patina lint --json     # verify the new page is valid
+patina index           # update the index incrementally
+```
+
+`patina install-agent` places these instructions in `knowledge/AGENTS.md` and in tool-specific locations (e.g. `.claude/CLAUDE.md` for Claude Code). The instructions are thin wrappers over the CLI — they do not define an agent-specific protocol, and they do not require MCP.
+
+---
 
 ## Contributing & Principles of Participation
 
-Pull requests are welcome. For major changes, please open an issue first
-to discuss what you would like to change.
+Pull requests are welcome. For major changes, open an issue first to discuss the approach.
 
-Please make sure to update tests as appropriate.
+Please update tests when changing behaviour. The test suite includes unit tests, integration tests, fixture-based tests, and golden output tests — all of which should pass before a pull request is opened.
 
-Everyone is invited and welcome to contribute: open issues, propose pull requests, share ideas, or help improve documentation.  
-Participation is open to all, regardless of background or viewpoint.  
+Everyone is welcome to contribute: open issues, propose pull requests, share ideas, or improve documentation. Participation is open to all, regardless of background or viewpoint.
 
-This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md),  
-which affirms respect for people, freedom to critique ideas, and space for diverse perspectives.  
+This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md), which affirms respect for people, freedom to critique ideas, and space for diverse perspectives.
 
-## Copyright and license
+---
+
+## Copyright and License
 
 Copyright © 2026 Iwan van der Kleijn
 
-Licensed under the MIT License 
-[MIT](https://choosealicense.com/licenses/mit/)
+Licensed under the [MIT License](https://choosealicense.com/licenses/mit/).
