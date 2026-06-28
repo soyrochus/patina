@@ -11,6 +11,8 @@ Patina is a local-first, Git-compatible knowledge tool for software teams and AI
 
 ---
 
+![Knowledge](./images/knowledge.png)
+
 ## The Idea Behind Patina
 
 ### The LLM Wiki pattern
@@ -26,7 +28,7 @@ Patina takes the LLM Wiki idea and makes it an engineering-grade tool:
 - **Git is the source of truth.** Knowledge files are committed, reviewed, and versioned like code. The local index is generated state — always rebuildable, never committed.
 - **Provenance is explicit.** Every wiki page can declare which source files it was synthesized from. Patina tracks source hashes and warns when a referenced source has changed since the page was last reviewed.
 - **Retrieval is deterministic.** Chunking, indexing, and scoring use stable algorithms. The same query against the same knowledge base always produces the same result ranking.
-- **The CLI is the contract.** Agent integrations are thin instruction files that tell tools how to call `patina query`, `patina read`, `patina lint`, and `patina stale`. There is no MCP server, no hosted service, and no vendor lock-in in the v0.1 core.
+- **The CLI is the contract.** Agent integrations are generated Agent Skills that tell tools how to call `patina query`, `patina read`, `patina lint`, and `patina stale`. There is no MCP server, no hosted service, and no vendor lock-in in the core.
 
 The project is intentionally *not*:
 
@@ -296,16 +298,39 @@ patina doctor
 patina doctor --json
 ```
 
-### `patina install-agent`
+### `patina install-skills`
 
-Writes agent instruction files so that AI coding agents know how to use Patina commands in this repository.
+Installs Patina Agent Skills for coding tools that support `SKILL.md`-based skills. Every run ensures the shared operating instructions exist at `<knowledge_dir>/AGENTS.md`. Host-specific skill files are written only when `--for` is provided.
 
 ```bash
-patina install-agent                     # writes knowledge/AGENTS.md
-patina install-agent --agent claude-code # also writes .claude/CLAUDE.md
-patina install-agent --force             # overwrite existing files
-patina install-agent --json
+patina install-skills
+patina install-skills --for github-copilot
+patina install-skills --for codex
+patina install-skills --for claude-code
+patina install-skills --for github-copilot --for codex
+patina install-skills --for all
+patina install-skills --for github-copilot --force
+patina install-skills --for codex --json
 ```
+
+Supported targets:
+
+| Target | Files written |
+| ------ | ------------- |
+| no `--for` | `knowledge/AGENTS.md` only |
+| `github-copilot` | `.github/skills/patina-query/SKILL.md`, `.github/skills/patina-check/SKILL.md` |
+| `codex` | `.agents/skills/patina-query/SKILL.md`, `.agents/skills/patina-check/SKILL.md`, root `AGENTS.md` |
+| `claude-code` | `.claude/skills/patina-query/SKILL.md`, `.claude/skills/patina-check/SKILL.md` |
+| `all` | all host-specific skill targets |
+
+Patina installs two skills for each selected host:
+
+- `patina-query`: search the Patina knowledge base, read the most relevant pages, and answer from Git-tracked Markdown content.
+- `patina-check`: run lint and stale checks before or after editing knowledge files.
+
+Generated `SKILL.md` files include the marker `<!-- PATINA GENERATED SKILL -->`. Patina replaces files with that marker on later runs. Existing non-managed skill files are skipped by default and overwritten only with `--force`.
+
+Generated skills do not include `allowed-tools`; the agent host keeps its normal command approval behavior.
 
 ---
 
@@ -363,6 +388,20 @@ required = ["title", "type", "status", "source_kind"]
 
 Agents should treat Patina as read-mostly durable context.
 
+Install shared instructions and optional host-specific skills with:
+
+```bash
+patina install-skills
+patina install-skills --for codex
+patina install-skills --for github-copilot
+patina install-skills --for claude-code
+```
+
+The generated skills are task-scoped wrappers around the CLI:
+
+- Use `patina-query` when answering questions about project context, architecture, decisions, domain knowledge, or prior repository knowledge.
+- Use `patina-check` when validating knowledge health or before changing files under the knowledge directory.
+
 **Finding relevant knowledge:**
 
 ```bash
@@ -389,7 +428,7 @@ patina lint --json     # verify the new page is valid
 patina index           # update the index incrementally
 ```
 
-`patina install-agent` places these instructions in `knowledge/AGENTS.md` and in tool-specific locations (e.g. `.claude/CLAUDE.md` for Claude Code). The instructions are thin wrappers over the CLI — they do not define an agent-specific protocol, and they do not require MCP.
+The shared `knowledge/AGENTS.md` file remains the full operating reference for humans and agents. Host-specific `SKILL.md` files point back to that shared file and do not require MCP or a hosted service.
 
 ---
 
