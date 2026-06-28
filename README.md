@@ -384,7 +384,7 @@ required = ["title", "type", "status", "source_kind"]
 
 ---
 
-## Agent Usage
+## Skill Usage
 
 Agents should treat Patina as read-mostly durable context.
 
@@ -429,6 +429,27 @@ patina index           # update the index incrementally
 ```
 
 The shared `knowledge/AGENTS.md` file remains the full operating reference for humans and agents. Host-specific `SKILL.md` files point back to that shared file and do not require MCP or a hosted service.
+
+
+## Try the Knowledge Workflow
+
+Patina is easiest to understand by using it with an AI coding agent.
+
+The repository includes a guided exercise that asks an agent to add useful project knowledge, validate it, index it, and query it back through Patina:
+
+[Exercise: Let Patina Teach Itself Something Useful](docs/patina-knowledge-exercise.md)
+
+The exercise demonstrates the intended workflow:
+
+```bash
+patina query
+patina read
+patina lint
+patina index
+patina stale
+```
+
+It also shows the main design principle in practice: Git-tracked Markdown is the durable knowledge base, while `.patina/` is only generated local state.
 
 ---
 
