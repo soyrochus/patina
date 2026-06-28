@@ -64,6 +64,20 @@ fn init_git(dir: &Path) {
     assert!(status.success());
 }
 
+fn read_file(path: impl AsRef<Path>) -> String {
+    fs::read_to_string(path).expect("file should be readable")
+}
+
+fn assert_skill_file(path: &Path, expected_name: &str) {
+    let contents = read_file(path);
+    assert!(contents.contains("---\n"));
+    assert!(contents.contains(&format!("name: {expected_name}")));
+    assert!(contents.contains("description:"));
+    assert!(contents.contains("license: MIT"));
+    assert!(contents.contains("<!-- PATINA GENERATED SKILL -->"));
+    assert!(!contents.contains("allowed-tools"));
+}
+
 #[test]
 fn init_creates_structure_and_gitignore() {
     let dir = temp_dir("init");
@@ -305,6 +319,261 @@ fn doctor_human_output_aligns_columns() {
     for starts in column_starts {
         assert_eq!(starts[..3], expected[..3]);
     }
+}
+
+#[test]
+fn install_skills_no_targets_writes_shared_agents_only() {
+    let dir = temp_dir("install-skills-shared");
+
+    let output = run(&dir, &["install-skills"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let agents = read_file(dir.join("knowledge/AGENTS.md"));
+    assert!(agents.contains("<!-- BEGIN PATINA AGENT INSTRUCTIONS -->"));
+    assert!(agents.contains("patina query"));
+    assert!(agents.contains("patina index"));
+    assert!(!dir.join(".github/skills/patina-query/SKILL.md").exists());
+    assert!(!dir.join(".agents/skills/patina-query/SKILL.md").exists());
+    assert!(!dir.join(".claude/skills/patina-query/SKILL.md").exists());
+}
+
+#[test]
+fn install_skills_github_copilot_writes_github_skills() {
+    let dir = temp_dir("install-skills-github");
+
+    let output = run(&dir, &["install-skills", "--for", "github-copilot"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(dir.join("knowledge/AGENTS.md").exists());
+    assert_skill_file(
+        &dir.join(".github/skills/patina-query/SKILL.md"),
+        "patina-query",
+    );
+    assert_skill_file(
+        &dir.join(".github/skills/patina-check/SKILL.md"),
+        "patina-check",
+    );
+    assert!(!dir.join(".github/prompts/patina-query.prompt.md").exists());
+    assert!(!dir.join(".github/prompts/patina-check.prompt.md").exists());
+}
+
+#[test]
+fn install_skills_codex_writes_agents_skills_and_root_agents() {
+    let dir = temp_dir("install-skills-codex");
+
+    let output = run(&dir, &["install-skills", "--for", "codex"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_skill_file(
+        &dir.join(".agents/skills/patina-query/SKILL.md"),
+        "patina-query",
+    );
+    assert_skill_file(
+        &dir.join(".agents/skills/patina-check/SKILL.md"),
+        "patina-check",
+    );
+    let root_agents = read_file(dir.join("AGENTS.md"));
+    assert!(root_agents.contains("<!-- BEGIN PATINA CODEX CONTEXT -->"));
+    assert!(root_agents.contains(".agents/skills/"));
+    assert!(root_agents.contains("knowledge/AGENTS.md"));
+}
+
+#[test]
+fn install_skills_claude_code_writes_claude_skills() {
+    let dir = temp_dir("install-skills-claude");
+
+    let output = run(&dir, &["install-skills", "--for", "claude-code"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_skill_file(
+        &dir.join(".claude/skills/patina-query/SKILL.md"),
+        "patina-query",
+    );
+    assert_skill_file(
+        &dir.join(".claude/skills/patina-check/SKILL.md"),
+        "patina-check",
+    );
+    let query = read_file(dir.join(".claude/skills/patina-query/SKILL.md"));
+    assert!(!query.contains("slash command"));
+}
+
+#[test]
+fn install_skills_all_writes_all_targets() {
+    let dir = temp_dir("install-skills-all");
+
+    let value = json(&run(&dir, &["install-skills", "--for", "all", "--json"]));
+
+    assert_eq!(value["ok"], true);
+    assert!(dir.join(".github/skills/patina-query/SKILL.md").exists());
+    assert!(dir.join(".agents/skills/patina-query/SKILL.md").exists());
+    assert!(dir.join(".claude/skills/patina-query/SKILL.md").exists());
+    assert!(
+        value["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning["code"] == "duplicate_skill_names_possible")
+    );
+}
+
+#[test]
+fn install_skills_repeated_for_flags() {
+    let dir = temp_dir("install-skills-repeated");
+
+    let output = run(
+        &dir,
+        &[
+            "install-skills",
+            "--for",
+            "github-copilot",
+            "--for",
+            "codex",
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(dir.join(".github/skills/patina-query/SKILL.md").exists());
+    assert!(dir.join(".agents/skills/patina-query/SKILL.md").exists());
+    assert!(!dir.join(".claude/skills/patina-query/SKILL.md").exists());
+}
+
+#[test]
+fn install_skills_substitutes_custom_knowledge_dir() {
+    let dir = temp_dir("install-skills-custom-knowledge");
+    fs::write(
+        dir.join("patina.toml"),
+        "[knowledge]\ndir = \"docs/knowledge\"\n",
+    )
+    .expect("config should write");
+
+    let output = run(&dir, &["install-skills", "--for", "codex"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(dir.join("docs/knowledge/AGENTS.md").exists());
+    let skill = read_file(dir.join(".agents/skills/patina-query/SKILL.md"));
+    let root_agents = read_file(dir.join("AGENTS.md"));
+    assert!(skill.contains("docs/knowledge/AGENTS.md"));
+    assert!(root_agents.contains("docs/knowledge/AGENTS.md"));
+}
+
+#[test]
+fn install_skills_json_reports_written_files() {
+    let dir = temp_dir("install-skills-json");
+
+    let value = json(&run(
+        &dir,
+        &["install-skills", "--for", "github-copilot", "--json"],
+    ));
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["command"], "install-skills");
+    assert_eq!(
+        value["data"]["targets"],
+        serde_json::json!(["github-copilot"])
+    );
+    let files = value["data"]["files_written"].as_array().expect("files");
+    assert!(files.iter().any(|path| path == "knowledge/AGENTS.md"));
+    assert!(
+        files
+            .iter()
+            .any(|path| path == ".github/skills/patina-query/SKILL.md")
+    );
+    assert!(
+        files
+            .iter()
+            .any(|path| path == ".github/skills/patina-check/SKILL.md")
+    );
+}
+
+#[test]
+fn install_agent_alias_emits_deprecation_warning() {
+    let dir = temp_dir("install-agent-alias");
+
+    let value = json(&run(&dir, &["install-agent", "--json"]));
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["command"], "install-agent");
+    assert!(dir.join("knowledge/AGENTS.md").exists());
+    assert!(
+        value["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning["code"] == "install_agent_deprecated")
+    );
+}
+
+#[test]
+fn install_skills_skips_non_managed_existing_file() {
+    let dir = temp_dir("install-skills-skip");
+    let skill_path = dir.join(".github/skills/patina-query/SKILL.md");
+    fs::create_dir_all(skill_path.parent().expect("skill parent")).expect("parent should create");
+    fs::write(&skill_path, "user-authored skill").expect("skill should write");
+
+    let value = json(&run(
+        &dir,
+        &["install-skills", "--for", "github-copilot", "--json"],
+    ));
+
+    assert_eq!(read_file(&skill_path), "user-authored skill");
+    assert!(
+        value["data"]["files_skipped"]
+            .as_array()
+            .expect("skipped")
+            .iter()
+            .any(|path| path == ".github/skills/patina-query/SKILL.md")
+    );
+    assert!(
+        value["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning["code"] == "skill_file_exists_not_managed")
+    );
+}
+
+#[test]
+fn install_skills_force_overwrites_non_managed_existing_file() {
+    let dir = temp_dir("install-skills-force");
+    let skill_path = dir.join(".github/skills/patina-query/SKILL.md");
+    fs::create_dir_all(skill_path.parent().expect("skill parent")).expect("parent should create");
+    fs::write(&skill_path, "user-authored skill").expect("skill should write");
+
+    let output = run(
+        &dir,
+        &["install-skills", "--for", "github-copilot", "--force"],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_skill_file(&skill_path, "patina-query");
 }
 
 #[test]

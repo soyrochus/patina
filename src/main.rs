@@ -58,6 +58,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Read(args) => patina::cli::read::run(args, &config),
         Commands::Stale(args) => patina::cli::stale::run(args, &config),
         Commands::Doctor(args) => patina::cli::doctor::run(args, &config),
+        Commands::InstallSkills(args) => patina::cli::skills::run(args, &config),
         Commands::InstallAgent(args) => patina::cli::agent::run(args, &config),
     }
 }

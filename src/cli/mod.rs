@@ -5,6 +5,7 @@ pub mod init;
 pub mod lint;
 pub mod query;
 pub mod read;
+pub mod skills;
 pub mod stale;
 pub mod status;
 
@@ -29,6 +30,7 @@ impl Cli {
             Commands::Read(args) => args.json,
             Commands::Stale(args) => args.json,
             Commands::Doctor(args) => args.json,
+            Commands::InstallSkills(args) => args.json,
             Commands::InstallAgent(args) => args.json,
         }
     }
@@ -43,6 +45,7 @@ impl Cli {
             Commands::Read(_) => "read",
             Commands::Stale(_) => "stale",
             Commands::Doctor(_) => "doctor",
+            Commands::InstallSkills(_) => "install-skills",
             Commands::InstallAgent(_) => "install-agent",
         }
     }
@@ -58,6 +61,8 @@ pub enum Commands {
     Read(read::ReadArgs),
     Stale(stale::StaleArgs),
     Doctor(doctor::DoctorArgs),
+    #[command(name = "install-skills")]
+    InstallSkills(skills::InstallSkillsArgs),
     #[command(name = "install-agent")]
     InstallAgent(agent::InstallAgentArgs),
 }

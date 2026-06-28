@@ -409,4 +409,4 @@ This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.m
 
 Copyright © 2026 Iwan van der Kleijn
 
-Licensed under the [MIT License](https://choosealicense.com/licenses/mit/).
+Licensed under the [MIT License](https://choosealicense.com/licenses/mit/). See the [LICENSE file](./LICENSE) in the repository.
