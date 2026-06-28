@@ -23,6 +23,10 @@ exclude = [
 name = "patina"
 path = "src/main.rs"
 
+[lib]
+name = "patina"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow = "1.0"
 camino = "1.1"
